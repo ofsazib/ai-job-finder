@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Job Finder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      --ring-track: #eef2f6;
+    }
+
+    body {
+      background:
+        radial-gradient(60rem 60rem at 110% -10%, #eef2ff 0%, transparent 55%),
+        radial-gradient(50rem 50rem at -10% 110%, #f0fdfa 0%, transparent 50%),
+        #f6f7f9;
+      background-attachment: fixed;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinning { display: inline-block; animation: spin 0.9s linear infinite; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up { animation: fadeUp 0.35s ease both; }
+
+    /* Job card: hover lift + verdict accent bar down the left edge. */
+    .job-card {
+      position: relative;
+      overflow: hidden;
+      transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+    }
+    .job-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 28px -12px rgba(15, 23, 42, 0.18);
+      border-color: #e2e8f0;
+    }
+    .job-card::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+    }
+    .accent-apply::before  { background: linear-gradient(#6366f1, #4f46e5); }
+    .accent-review::before { background: linear-gradient(#f59e0b, #d97706); }
+    .accent-skip::before   { background: #e2e8f0; }
+
+    /* Custom select chevron */
+    select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.6rem center;
+      padding-right: 2rem;
+    }
+
+    .thin-scroll::-webkit-scrollbar { width: 8px; }
+    .thin-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+  </style>
+</head>
+
+<body class="text-slate-800 min-h-screen">
+  <div class="flex min-h-screen">
+
+    <!-- ── Sidebar ─────────────────────────────────────────── -->
+    <aside class="w-72 shrink-0 bg-white/80 backdrop-blur border-r border-slate-200/80
+                  flex flex-col sticky top-0 h-screen px-5 py-6">
+      <div class="flex items-center gap-3 mb-8 px-1">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600
+                    flex items-center justify-center text-white font-bold text-lg
+                    shadow-lg shadow-indigo-500/30">J</div>
+        <div>
+          <h1 class="text-[15px] font-bold tracking-tight text-slate-900 leading-none">Job Finder</h1>
+          <p class="text-[11px] text-slate-400 mt-1 leading-none">AI-matched roles</p>
+        </div>
+      </div>
+
+      <button id="run-btn" onclick="runAgent()"
+        class="group w-full bg-gradient-to-br from-indigo-500 to-violet-600
+               hover:from-indigo-600 hover:to-violet-700 active:scale-[0.98]
+               disabled:from-slate-300 disabled:to-slate-300 disabled:cursor-not-allowed
+               text-white font-semibold px-4 py-2.5 rounded-xl transition-all text-sm
+               shadow-lg shadow-indigo-500/25 disabled:shadow-none
+               flex items-center justify-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+          <path d="M5 3l14 9-14 9V3z"/>
+        </svg>
+        <span id="run-btn-label">Find Jobs</span>
+      </button>
+
+      <!-- Connected vertical stepper -->
+      <div id="progress-section" class="hidden mt-7">
+        <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-3 px-1">Pipeline</p>
+        <div class="relative pl-1">
+          <div class="absolute left-[15px] top-3 bottom-3 w-px bg-slate-200"></div>
+          <div class="relative flex items-center gap-3 py-1.5">
+            <span id="s1-icon" class="relative z-10 w-6 h-6 rounded-full bg-white border border-slate-300
+                   text-slate-300 flex items-center justify-center text-[11px]">1</span>
+            <span id="s1-label" class="text-[13px] text-slate-400">Build profile</span>
+          </div>
+          <div class="relative flex items-center gap-3 py-1.5">
+            <span id="s2-icon" class="relative z-10 w-6 h-6 rounded-full bg-white border border-slate-300
+                   text-slate-300 flex items-center justify-center text-[11px]">2</span>
+            <span id="s2-label" class="text-[13px] text-slate-400">Discover fresh jobs</span>
+          </div>
+          <div class="relative flex items-center gap-3 py-1.5">
+            <span id="s3-icon" class="relative z-10 w-6 h-6 rounded-full bg-white border border-slate-300
+                   text-slate-300 flex items-center justify-center text-[11px]">3</span>
+            <span id="s3-label" class="text-[13px] text-slate-400">Analyze &amp; score</span>
+          </div>
+          <div class="relative flex items-center gap-3 py-1.5">
+            <span id="s4-icon" class="relative z-10 w-6 h-6 rounded-full bg-white border border-slate-300
+                   text-slate-300 flex items-center justify-center text-[11px]">4</span>
+            <span id="s4-label" class="text-[13px] text-slate-400">Cover letters</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="mt-7 space-y-2.5">
+        <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-400 px-1">View</p>
+        <select id="filter-verdict" onchange="renderJobs()"
+          class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[13px]
+                 text-slate-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-200
+                 focus:border-indigo-300 transition">
+          <option value="all">All verdicts</option>
+          <option value="apply">Apply</option>
+          <option value="review">Review</option>
+          <option value="skip">Skip</option>
+        </select>
+        <select id="sort-by" onchange="renderJobs()"
+          class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[13px]
+                 text-slate-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-200
+                 focus:border-indigo-300 transition">
+          <option value="score-desc">Score: High → Low</option>
+          <option value="score-asc">Score: Low → High</option>
+          <option value="date-desc">Date: Newest first</option>
+          <option value="company-asc">Company: A → Z</option>
+        </select>
+      </div>
+
+      <div class="mt-auto pt-4 border-t border-slate-200/70">
+        <p id="last-run" class="text-[11px] text-slate-400 px-1"></p>
+      </div>
+    </aside>
+
+    <!-- ── Main content ────────────────────────────────────── -->
+    <main class="flex-1 min-w-0">
+      <div class="max-w-5xl mx-auto px-8 py-8">
+
+        <!-- Page header -->
+        <header class="flex items-end justify-between mb-6 gap-4 flex-wrap">
+          <div>
+            <h2 class="text-2xl font-extrabold tracking-tight text-slate-900">Your matches</h2>
+            <p class="text-sm text-slate-500 mt-1">Ranked by fit against your resume, freshest sources first.</p>
+          </div>
+          <div id="count-chip" class="hidden shrink-0 text-[13px] font-medium text-slate-600
+                bg-white border border-slate-200 rounded-full px-3.5 py-1.5 shadow-sm">
+            <span id="job-count"></span>
+          </div>
+        </header>
+
+        <!-- Summary Banner -->
+        <div id="summary-banner" class="hidden mb-5 fade-up bg-indigo-50 border border-indigo-200
+           rounded-xl px-4 py-3 text-indigo-800 text-sm flex items-center gap-2.5">
+          <svg class="w-4 h-4 shrink-0 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+            <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+          <span id="summary-text"></span>
+        </div>
+
+        <!-- Error Banner -->
+        <div id="error-banner" class="hidden mb-5 fade-up bg-red-50 border border-red-200
+           rounded-xl px-4 py-3 text-red-700 text-sm flex items-center gap-2.5">
+          <svg class="w-4 h-4 shrink-0 text-red-500" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <span id="error-text"></span>
+        </div>
+
+        <!-- Jobs List -->
+        <div id="jobs-list"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Cover Letter Modal -->
+  <div id="cl-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm
+     flex items-center justify-center z-50 p-4" onclick="if(event.target===this)closeCL()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[82vh] flex flex-col
+                fade-up ring-1 ring-slate-200">
+      <div class="flex justify-between items-center px-6 py-4 border-b border-slate-100 shrink-0">
+        <div>
+          <h3 class="font-bold text-slate-900 leading-none">Cover letter</h3>
+          <p id="cl-subtitle" class="text-xs text-slate-400 mt-1.5 leading-none"></p>
+        </div>
+        <div class="flex items-center gap-1">
+          <button id="cl-copy" onclick="copyCL()"
+            class="text-xs font-medium text-slate-500 hover:text-indigo-600 hover:bg-indigo-50
+                   px-3 py-1.5 rounded-lg transition">Copy</button>
+          <button onclick="closeCL()"
+            class="text-slate-400 hover:text-slate-700 hover:bg-slate-100 w-8 h-8 rounded-lg
+                   text-xl leading-none transition flex items-center justify-center">&times;</button>
+        </div>
+      </div>
+      <pre id="cl-content" class="thin-scroll whitespace-pre-wrap text-[13.5px] text-slate-700
+                                px-6 py-5 overflow-y-auto flex-1 leading-relaxed"></pre>
+    </div>
+  </div>
+
+  <script>
+    let allJobs = [];
+
+    /* ── utils ───────────────────────────────────────────── */
+    const esc = s => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    /* Score tier → stroke color + text color for the radial gauge. */
+    function scoreTier(score) {
+      if (score >= 80) return { stroke: '#059669', text: 'text-emerald-600' };  // strong
+      if (score >= 60) return { stroke: '#d97706', text: 'text-amber-600' };    // medium
+      return { stroke: '#e11d48', text: 'text-rose-600' };                      // weak
+    }
+
+    /* SVG radial score gauge (0–100). r chosen so circumference = 100. */
+    function scoreRing(score) {
+      const s = Math.max(0, Math.min(100, Number(score) || 0));
+      const { stroke, text } = scoreTier(s);
+      return `
+        <div class="relative w-12 h-12 shrink-0">
+          <svg viewBox="0 0 36 36" class="w-12 h-12 -rotate-90">
+            <circle cx="18" cy="18" r="15.9155" fill="none" stroke="var(--ring-track)" stroke-width="3.5"/>
+            <circle cx="18" cy="18" r="15.9155" fill="none" stroke="${stroke}" stroke-width="3.5"
+              stroke-linecap="round" stroke-dasharray="${s} 100"/>
+          </svg>
+          <span class="absolute inset-0 flex items-center justify-center text-sm font-bold ${text}">
+            ${score ?? '?'}
+          </span>
+        </div>`;
+    }
+
+    const VERDICT = {
+      apply:  { label: 'Apply',  cls: 'bg-indigo-50 text-indigo-700 ring-indigo-100', dot: 'bg-indigo-500' },
+      review: { label: 'Review', cls: 'bg-amber-50 text-amber-700 ring-amber-100',    dot: 'bg-amber-500' },
+      skip:   { label: 'Skip',   cls: 'bg-slate-100 text-slate-500 ring-slate-200',   dot: 'bg-slate-400' },
+    };
+    function verdictBadge(v) {
+      const m = VERDICT[v] || VERDICT.skip;
+      return `<span class="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5
+              rounded-full ring-1 ${m.cls}">
+                <span class="w-1.5 h-1.5 rounded-full ${m.dot}"></span>${m.label}
+              </span>`;
+    }
+
+    function accentCls(v) {
+      if (v === 'apply') return 'accent-apply';
+      if (v === 'review') return 'accent-review';
+      return 'accent-skip';
+    }
+
+    function statusCls(s) {
+      if (s === 'applied') return 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-600/20';
+      if (s === 'skipped') return 'bg-slate-500 hover:bg-slate-600 text-white';
+      return 'bg-white hover:bg-slate-50 text-slate-600 border border-slate-200';
+    }
+
+    function statusLabel(s) {
+      if (s === 'applied') return 'Applied ✓';
+      if (s === 'skipped') return 'Skipped';
+      return 'Mark status';
+    }
+
+    function nextStatus(s) {
+      if (!s || s === 'none') return 'applied';
+      if (s === 'applied') return 'skipped';
+      return 'none';
+    }
+
+    /* Days-ago label from an ISO posted_date. */
+    function freshness(iso) {
+      if (!iso) return '';
+      const then = new Date(iso);
+      if (isNaN(then)) return '';
+      const days = Math.floor((Date.now() - then.getTime()) / 86400000);
+      if (days <= 0) return 'today';
+      if (days === 1) return '1 day ago';
+      return `${days} days ago`;
+    }
+
+    function collapse(label, items, tone) {
+      if (!items?.length) return '';
+      const dot = tone === 'flag' ? 'text-rose-400' : 'text-emerald-500';
+      const lis = items.map(i =>
+        `<li class="flex gap-2"><span class="${dot} mt-0.5 shrink-0">•</span><span>${esc(i)}</span></li>`
+      ).join('');
+      return `<details class="mt-3 group" open>
+      <summary class="text-[11px] font-semibold uppercase tracking-wider text-slate-400
+                      cursor-pointer hover:text-slate-600 select-none list-none flex items-center gap-1">
+        <span class="transition-transform group-open:rotate-90 text-slate-300">›</span>
+        ${esc(label)} <span class="text-slate-300 font-normal">(${items.length})</span>
+      </summary>
+      <ul class="mt-1.5 ml-1 space-y-1 text-[13px] text-slate-600">${lis}</ul>
+    </details>`;
+    }
+
+    /* ── step progress ───────────────────────────────────── */
+    function setStep(n, state) {
+      const icon = document.getElementById(`s${n}-icon`);
+      const label = document.getElementById(`s${n}-label`);
+      const base = 'relative z-10 w-6 h-6 rounded-full flex items-center justify-center text-[11px] transition-all';
+      if (state === 'running') {
+        icon.className = `${base} bg-indigo-600 border border-indigo-600 text-white shadow-md shadow-indigo-500/30`;
+        icon.innerHTML = '<span class="spinning">↻</span>';
+        label.className = 'text-[13px] text-indigo-700 font-semibold';
+      } else if (state === 'done') {
+        icon.className = `${base} bg-emerald-500 border border-emerald-500 text-white`;
+        icon.textContent = '✓';
+        label.className = 'text-[13px] text-slate-600';
+      } else if (state === 'error') {
+        icon.className = `${base} bg-rose-500 border border-rose-500 text-white`;
+        icon.textContent = '✕';
+        label.className = 'text-[13px] text-rose-600 font-medium';
+      } else {
+        icon.className = `${base} bg-white border border-slate-300 text-slate-300`;
+        icon.textContent = n;
+        label.className = 'text-[13px] text-slate-400';
+      }
+    }
+
+    /* ── run agent ───────────────────────────────────────── */
+    function runAgent() {
+      const btn = document.getElementById('run-btn');
+      const prog = document.getElementById('progress-section');
+      const summary = document.getElementById('summary-banner');
+      const errBan = document.getElementById('error-banner');
+
+      btn.disabled = true;
+      document.getElementById('run-btn-label').textContent = 'Finding…';
+      prog.classList.remove('hidden');
+      summary.classList.add('hidden');
+      errBan.classList.add('hidden');
+      for (let i = 1; i <= 4; i++) setStep(i, 'pending');
+
+      const es = new EventSource('/api/run');
+
+      es.onmessage = ({ data }) => {
+        const ev = JSON.parse(data);
+
+        if (ev.step === 'busy') {
+          es.close(); reset(btn, prog);
+          showError('A run is already in progress.');
+          return;
+        }
+        if (ev.step === 'error') {
+          es.close(); reset(btn, prog);
+          for (let i = 1; i <= 4; i++) {
+            if (document.getElementById(`s${i}-icon`).textContent.includes('↻') ||
+                document.getElementById(`s${i}-icon`).querySelector('.spinning')) setStep(i, 'error');
+          }
+          showError(`Pipeline error: ${ev.message}`);
+          return;
+        }
+        if (ev.step === 'complete') {
+          es.close(); reset(btn, prog);
+          const ts = new Date().toLocaleString();
+          localStorage.setItem('lastRun', ts);
+          document.getElementById('last-run').textContent = `Last run: ${ts}`;
+          document.getElementById('summary-text').textContent =
+            `Found ${ev.total} jobs · ${ev.above_threshold} above threshold (score ≥ 70)`;
+          summary.classList.remove('hidden');
+          loadJobs();
+          return;
+        }
+        if (typeof ev.step === 'number') {
+          setStep(ev.step, ev.status === 'running' ? 'running' : 'done');
+        }
+      };
+
+      es.onerror = () => {
+        es.close(); reset(btn, prog);
+        showError('Connection lost. Is the server running?');
+      };
+    }
+
+    function reset(btn, prog) {
+      btn.disabled = false;
+      document.getElementById('run-btn-label').textContent = 'Find Jobs';
+      setTimeout(() => prog.classList.add('hidden'), 1200);
+    }
+
+    function showError(msg) {
+      document.getElementById('error-text').textContent = msg;
+      document.getElementById('error-banner').classList.remove('hidden');
+    }
+
+    /* ── jobs ────────────────────────────────────────────── */
+    async function loadJobs() {
+      try {
+        const res = await fetch('/api/jobs');
+        allJobs = await res.json();
+        renderJobs();
+      } catch (e) {
+        console.error('Failed to load jobs', e);
+      }
+    }
+
+    function renderJobs() {
+      const verdict = document.getElementById('filter-verdict').value;
+      const sort = document.getElementById('sort-by').value;
+
+      let jobs = allJobs.filter(j => verdict === 'all' || j.verdict === verdict);
+      if (sort === 'score-desc') jobs.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+      else if (sort === 'score-asc') jobs.sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
+      else if (sort === 'date-desc') jobs.sort((a, b) =>
+        (b.posted_date ?? '').localeCompare(a.posted_date ?? ''));
+      else jobs.sort((a, b) => (a.company ?? '').localeCompare(b.company ?? ''));
+
+      const chip = document.getElementById('count-chip');
+      document.getElementById('job-count').textContent =
+        `${jobs.length} job${jobs.length !== 1 ? 's' : ''}`;
+      chip.classList.toggle('hidden', allJobs.length === 0);
+
+      if (!jobs.length) {
+        document.getElementById('jobs-list').innerHTML = `
+          <div class="flex flex-col items-center justify-center py-24 text-center">
+            <div class="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+              <svg class="w-7 h-7 text-slate-300" fill="none" stroke="currentColor" stroke-width="1.8"
+                   stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/>
+              </svg>
+            </div>
+            <p class="text-slate-500 font-medium">No jobs to show</p>
+            <p class="text-slate-400 text-sm mt-1">Run the finder or adjust your filters.</p>
+          </div>`;
+        return;
+      }
+
+      document.getElementById('jobs-list').innerHTML = jobs.map(job => {
+        const fresh = freshness(job.posted_date);
+        return `
+      <div class="job-card ${accentCls(job.verdict)} fade-up bg-white border border-slate-200/80
+                  rounded-2xl shadow-sm p-5 pl-6 mb-3.5">
+        <div class="flex items-start gap-4">
+          ${scoreRing(job.score)}
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap mb-1.5">
+              ${verdictBadge(job.verdict)}
+              ${job.source ? `<span class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${esc(job.source)}</span>` : ''}
+              ${fresh ? `<span class="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>${esc(fresh)}</span>` : ''}
+            </div>
+            <h3 class="font-semibold text-[15px] text-slate-900 leading-snug">${esc(job.title ?? '')}</h3>
+            <p class="text-[13px] text-slate-500 mt-0.5">
+              <span class="font-medium text-slate-600">${esc(job.company ?? '')}</span>${job.location ? ' · ' + esc(job.location) : ''}
+            </p>
+          </div>
+        </div>
+        ${collapse('Match reasons', job.match_reasons, 'reason')}
+        ${collapse('Red flags', job.red_flags, 'flag')}
+        ${job.suggested_angle ? `
+          <div class="mt-3 rounded-xl bg-indigo-50/60 border border-indigo-100 px-3.5 py-2.5">
+            <p class="text-[11px] font-semibold uppercase tracking-wider text-indigo-400 mb-0.5">Suggested angle</p>
+            <p class="text-[13px] text-slate-600 leading-relaxed">${esc(job.suggested_angle)}</p>
+          </div>` : ''}
+        <div class="flex gap-2 mt-4 flex-wrap items-center">
+          <a href="${esc(job.url ?? '#')}" target="_blank" rel="noopener noreferrer"
+             class="text-[13px] font-medium bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5
+                    rounded-lg transition shadow-sm shadow-indigo-600/20 inline-flex items-center gap-1.5">
+            Open job
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+              <path d="M7 17L17 7M7 7h10v10"/></svg>
+          </a>
+          <button onclick="openCL('${esc(job.company ?? '')}','${esc(job.title ?? '')}')"
+            class="text-[13px] font-medium bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300
+                   text-slate-700 px-3.5 py-1.5 rounded-lg transition">
+            Cover letter
+          </button>
+          <button onclick="toggleStatus('${esc(job.url ?? '')}','${esc(job.status ?? 'none')}')"
+            class="text-[13px] font-medium px-3.5 py-1.5 rounded-lg transition ml-auto ${statusCls(job.status)}">
+            ${statusLabel(job.status)}
+          </button>
+        </div>
+      </div>`;
+      }).join('');
+    }
+
+    async function toggleStatus(url, current) {
+      const next = nextStatus(current);
+      try {
+        const res = await fetch('/api/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, status: next })
+        });
+        if (!res.ok) throw new Error('server error');
+        const job = allJobs.find(j => j.url === url);
+        if (job) job.status = next;
+        renderJobs();
+      } catch {
+        showError('Failed to save status. Try again.');
+      }
+    }
+
+    /* ── cover letter modal ──────────────────────────────── */
+    async function openCL(company, title) {
+      const modal = document.getElementById('cl-modal');
+      const content = document.getElementById('cl-content');
+      document.getElementById('cl-subtitle').textContent =
+        [title, company].filter(Boolean).join(' · ');
+      content.textContent = 'Loading…';
+      modal.classList.remove('hidden');
+      try {
+        const res = await fetch(
+          `/api/cover-letter?company=${encodeURIComponent(company)}&title=${encodeURIComponent(title)}`
+        );
+        content.textContent = res.ok
+          ? (await res.json()).content
+          : 'No cover letter generated for this job.';
+      } catch {
+        content.textContent = 'Failed to load cover letter.';
+      }
+    }
+
+    function copyCL() {
+      const text = document.getElementById('cl-content').textContent;
+      navigator.clipboard?.writeText(text).then(() => {
+        const btn = document.getElementById('cl-copy');
+        const prev = btn.textContent;
+        btn.textContent = 'Copied ✓';
+        setTimeout(() => (btn.textContent = prev), 1500);
+      });
+    }
+
+    function closeCL() {
+      document.getElementById('cl-modal').classList.add('hidden');
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeCL();
+    });
+
+    /* ── init ────────────────────────────────────────────── */
+    const saved = localStorage.getItem('lastRun');
+    if (saved) document.getElementById('last-run').textContent = `Last run: ${saved}`;
+    loadJobs();
+  </script>
+</body>
+
+</html>

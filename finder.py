@@ -133,7 +133,9 @@ def analyze_jobs(jobs: list[dict]) -> list[dict]:
     today = datetime.now().strftime("%Y-%m-%d")
     prompt = (PROMPTS_DIR / "analyze.md").read_text(encoding="utf-8")
 
-    # Give the model only what it needs to judge — keep the payload small.
+    # Give the model only what it needs to judge — keep the payload small, but
+    # include the derived categorization so it can weigh work mode, locale,
+    # relocation support, seniority, and salary in its scoring.
     slim = [
         {
             "url": j["url"],
@@ -142,6 +144,12 @@ def analyze_jobs(jobs: list[dict]) -> list[dict]:
             "location": j["location"],
             "posted_date": j["posted_date"],
             "source": j["source"],
+            "work_mode": j.get("work_mode", "unknown"),
+            "locale": j.get("locale", "unknown"),
+            "relocation": j.get("relocation", "unknown"),
+            "employment_type": j.get("employment_type", "unknown"),
+            "seniority": j.get("seniority", "unknown"),
+            "salary": j.get("salary", ""),
             "description": j["description"],
         }
         for j in jobs
@@ -169,6 +177,14 @@ def analyze_jobs(jobs: list[dict]) -> list[dict]:
             "url": url,
             "posted_date": base.get("posted_date", ""),
             "source": base.get("source", ""),
+            # Carry the derived categorization through to the UI.
+            "work_mode": base.get("work_mode", "unknown"),
+            "locale": base.get("locale", "unknown"),
+            "relocation": base.get("relocation", "unknown"),
+            "employment_type": base.get("employment_type", "unknown"),
+            "seniority": base.get("seniority", "unknown"),
+            "salary": base.get("salary", ""),
+            "location_restrictions": base.get("location_restrictions", []),
             "score": entry.get("score", 0),
             "verdict": entry.get("verdict", "review"),
             "match_reasons": entry.get("match_reasons", []),

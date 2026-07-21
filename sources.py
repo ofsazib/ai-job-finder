@@ -19,7 +19,20 @@ Each source returns a list of normalized job dicts:
         "posted_epoch": int,   # unix seconds (0 if unknown)
         "source":       str,   # e.g. "remoteok"
         "tags":         list[str],
+
+        # ── categorization (derived in code, see categorize()) ──
+        "work_mode":    str,   # "remote" | "onsite" | "hybrid" | "unknown"
+        "locale":       str,   # "bangladesh" | "international" | "unknown"
+        "relocation":   str,   # "yes" | "no" | "unknown"
+        "employment_type": str,# "full-time" | "contract" | "part-time" | "internship" | "unknown"
+        "seniority":    str,   # "junior" | "mid" | "senior" | "lead" | "unknown"
+        "salary":       str,   # human-readable range, or "" if none published
+        "location_restrictions": list[str],  # regions the role is limited to
     }
+
+Most feeds are remote-only. LinkedIn (opt-in) is the source of *onsite* and
+Bangladesh-local postings, which is why the categorization below distinguishes
+work mode and locale rather than assuming everything is remote.
 
 All sources are free and require no API key. A source that fails (network,
 schema drift) logs a warning and returns [] — one bad feed never sinks a run.
@@ -101,18 +114,170 @@ def _norm(dt: datetime | None):
     return dt.isoformat(), int(dt.timestamp())
 
 
-def _job(title, company, location, url, description, dt, source, tags):
+# ── categorization ────────────────────────────────────────
+# These derive structured facets from free-text so the UI can filter and the
+# analyzer can reason about them. Everything is best-effort with an explicit
+# "unknown" fallback — we never guess a value we can't support from the text.
+
+BD_TERMS = ("bangladesh", "dhaka", "chittagong", "chattogram", "sylhet",
+            "khulna", "rajshahi", " bd ", "bd,", ",bd")
+
+_HYBRID_RE = re.compile(r"\bhybrid\b", re.I)
+_ONSITE_RE = re.compile(r"\b(on[\s-]?site|in[\s-]?office|in[\s-]?person)\b", re.I)
+_REMOTE_RE = re.compile(r"\b(remote|work from home|wfh|distributed|anywhere)\b", re.I)
+
+_RELOCATION_YES_RE = re.compile(
+    r"(relocation (assistance|support|package|available|provided|offered)"
+    r"|will relocate|visa sponsor|sponsorship (available|provided|offered)"
+    r"|we sponsor|help you relocate)", re.I)
+_RELOCATION_NO_RE = re.compile(
+    r"(no relocation|no visa sponsor|without sponsorship"
+    r"|relocation is not|cannot sponsor|no sponsorship)", re.I)
+
+_SENIORITY_PATTERNS = [
+    ("lead", re.compile(r"\b(lead|principal|staff|head of|director|architect)\b", re.I)),
+    ("senior", re.compile(r"\b(senior|sr\.?|lead)\b", re.I)),
+    ("junior", re.compile(r"\b(junior|jr\.?|entry[\s-]?level|graduate|intern)\b", re.I)),
+]
+
+_EMPLOYMENT_PATTERNS = [
+    ("internship", re.compile(r"\bintern(ship)?\b", re.I)),
+    ("contract", re.compile(r"\b(contract|freelance|contractor|b2b)\b", re.I)),
+    ("part-time", re.compile(r"\bpart[\s-]?time\b", re.I)),
+    ("full-time", re.compile(r"\bfull[\s-]?time\b", re.I)),
+]
+
+
+def detect_work_mode(location: str, description: str, explicit: str = "") -> str:
+    """remote / onsite / hybrid / unknown from an explicit hint + free text."""
+    if explicit:
+        e = explicit.lower()
+        if "hybrid" in e:
+            return "hybrid"
+        if "remote" in e:
+            return "remote"
+        if any(k in e for k in ("onsite", "on-site", "on site", "office")):
+            return "onsite"
+    blob = f"{location} {description}"
+    if _HYBRID_RE.search(blob):
+        return "hybrid"
+    if _REMOTE_RE.search(blob) and not _ONSITE_RE.search(blob):
+        return "remote"
+    if _ONSITE_RE.search(blob):
+        return "onsite"
+    # A concrete city/country in location with no remote signal reads as onsite.
+    if location and not _REMOTE_RE.search(location) and location.lower() != "remote":
+        return "onsite"
+    return "unknown"
+
+
+def detect_locale(location: str, description: str, restrictions: list[str]) -> str:
+    """bangladesh vs international vs unknown."""
+    blob = f" {location} {' '.join(restrictions or [])} ".lower()
+    if any(term in blob for term in BD_TERMS):
+        return "bangladesh"
+    if location and location.strip().lower() not in ("", "remote", "anywhere", "worldwide"):
+        return "international"
+    if restrictions:
+        return "international"
+    return "unknown"
+
+
+def detect_relocation(description: str) -> str:
+    """yes / no / unknown — does the posting mention relocation or visa help?"""
+    if _RELOCATION_NO_RE.search(description):
+        return "no"
+    if _RELOCATION_YES_RE.search(description):
+        return "yes"
+    return "unknown"
+
+
+def detect_seniority(title: str, description: str, explicit: str = "") -> str:
+    if explicit:
+        e = explicit.lower()
+        for level in ("lead", "principal", "staff"):
+            if level in e:
+                return "lead"
+        if "senior" in e:
+            return "senior"
+        if any(k in e for k in ("junior", "entry", "intern", "graduate")):
+            return "junior"
+        if "mid" in e:
+            return "mid"
+    text = f"{title} {description[:400]}"
+    for level, pat in _SENIORITY_PATTERNS:
+        if pat.search(text):
+            return level
+    return "unknown"
+
+
+def detect_employment_type(description: str, explicit: str = "") -> str:
+    if explicit:
+        e = explicit.lower().replace("_", " ")
+        for kind, _ in _EMPLOYMENT_PATTERNS:
+            if kind.replace("-", " ") in e or kind.replace("-", "") in e:
+                return kind
+    for kind, pat in _EMPLOYMENT_PATTERNS:
+        if pat.search(description):
+            return kind
+    return "unknown"
+
+
+def format_salary(min_s=None, max_s=None, currency="", period="") -> str:
+    """Human-readable salary range, or "" if nothing usable."""
+    if not min_s and not max_s:
+        return ""
+    cur = (currency or "").upper()
+    per = f"/{period}" if period else ""
+
+    def fmt(n):
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            return None
+        return f"{n // 1000}k" if n >= 10000 else str(n)
+
+    lo, hi = fmt(min_s), fmt(max_s)
+    if lo and hi and lo != hi:
+        body = f"{lo}–{hi}"
+    else:
+        body = lo or hi
+    if not body:
+        return ""
+    return f"{cur} {body}{per}".strip()
+
+
+def _job(title, company, location, url, description, dt, source, tags,
+         *, work_mode="", locale="", relocation="", employment_type="",
+         seniority="", salary="", location_restrictions=None):
+    """Build a normalized job dict, deriving any categorization not supplied.
+
+    Sources pass whatever structured fields they have (e.g. Himalayas gives
+    seniority + salary + locationRestrictions directly); everything else is
+    inferred from the title/location/description so all jobs share one shape.
+    """
     iso, epoch = _norm(dt)
+    location = (location or "Remote").strip() or "Remote"
+    description = strip_html(description or "")
+    restrictions = [str(r).strip() for r in (location_restrictions or []) if str(r).strip()]
+
     return {
         "title": (title or "").strip(),
         "company": (company or "").strip(),
-        "location": (location or "Remote").strip() or "Remote",
+        "location": location,
         "url": (url or "").strip(),
-        "description": strip_html(description or ""),
+        "description": description,
         "posted_date": iso,
         "posted_epoch": epoch,
         "source": source,
         "tags": [str(t).strip() for t in (tags or []) if str(t).strip()],
+        "work_mode": work_mode or detect_work_mode(location, description),
+        "locale": locale or detect_locale(location, description, restrictions),
+        "relocation": relocation or detect_relocation(description),
+        "employment_type": employment_type or detect_employment_type(description),
+        "seniority": seniority or detect_seniority(title or "", description),
+        "salary": salary or "",
+        "location_restrictions": restrictions,
     }
 
 
@@ -251,17 +416,167 @@ def fetch_hackernews() -> list[dict]:
     return jobs
 
 
+def fetch_himalayas() -> list[dict]:
+    """Himalayas — https://himalayas.app/jobs/api.
+
+    The richest feed: ships seniority, salary, employmentType, and
+    locationRestrictions directly, so most categorization is exact rather than
+    inferred. Returns the most recent postings first.
+    """
+    data = _get_json("https://himalayas.app/jobs/api?limit=100")
+    jobs = []
+    for item in data.get("jobs", []):
+        restrictions = item.get("locationRestrictions") or []
+        location = ", ".join(restrictions) if restrictions else "Remote"
+        salary = format_salary(
+            item.get("minSalary"), item.get("maxSalary"),
+            item.get("currency"), item.get("salaryPeriod"),
+        )
+        sen = item.get("seniority") or []
+        jobs.append(_job(
+            title=item.get("title"),
+            company=item.get("companyName"),
+            location=location,
+            url=item.get("applicationLink") or item.get("guid") or item.get("url"),
+            description=item.get("description") or item.get("excerpt"),
+            dt=parse_date(item.get("pubDate") or item.get("publishedDate") or item.get("updatedAt")),
+            source="himalayas",
+            tags=item.get("categories"),
+            # Himalayas is remote-first; every listing here is a remote role.
+            work_mode="remote",
+            seniority=detect_seniority("", "", sen[0] if sen else ""),
+            employment_type=detect_employment_type("", item.get("employmentType") or ""),
+            salary=salary,
+            location_restrictions=restrictions,
+        ))
+    return jobs
+
+
+def fetch_jobicy() -> list[dict]:
+    """Jobicy — https://jobicy.com/api/v2/remote-jobs (remote-first)."""
+    data = _get_json("https://jobicy.com/api/v2/remote-jobs?count=100")
+    jobs = []
+    for item in data.get("jobs", []):
+        geo = item.get("jobGeo") or "Remote"
+        jtype = item.get("jobType") or []
+        level = item.get("jobLevel") or ""
+        jobs.append(_job(
+            title=item.get("jobTitle"),
+            company=item.get("companyName"),
+            location=geo,
+            url=item.get("url"),
+            description=item.get("jobExcerpt") or item.get("jobDescription"),
+            dt=parse_date(item.get("pubDate")),
+            source="jobicy",
+            tags=item.get("jobIndustry"),
+            work_mode="remote",
+            seniority=detect_seniority("", "", level),
+            employment_type=detect_employment_type("", jtype[0] if jtype else ""),
+            location_restrictions=[geo] if geo and geo.lower() != "anywhere" else [],
+        ))
+    return jobs
+
+
+def fetch_workingnomads() -> list[dict]:
+    """Working Nomads — https://www.workingnomads.com/api/exposed_jobs/ (remote)."""
+    data = _get_json("https://www.workingnomads.com/api/exposed_jobs/")
+    jobs = []
+    for item in data if isinstance(data, list) else data.get("jobs", []):
+        jobs.append(_job(
+            title=item.get("title"),
+            company=item.get("company_name"),
+            location=item.get("location") or "Remote",
+            url=item.get("url"),
+            description=item.get("description"),
+            dt=parse_date(item.get("pub_date") or item.get("created")),
+            source="workingnomads",
+            tags=[t.strip() for t in (item.get("category_name") or "").split(",") if t.strip()],
+            work_mode="remote",
+        ))
+    return jobs
+
+
+# LinkedIn: public guest jobs endpoint returns HTML job cards (no auth, no
+# key). This is the ONLY source of onsite + Bangladesh-local postings, which is
+# why it's worth the fragility. Opt-in via SOURCES because LinkedIn rate-limits
+# by IP and can block — a failure here must never sink a normal run.
+LINKEDIN_GUEST_URL = (
+    "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+)
+# (keywords, location) pairs. Bangladesh pulls local onsite/hybrid roles;
+# the "Remote" pass pulls international remote roles LinkedIn indexes.
+LINKEDIN_SEARCHES = [
+    ("software engineer python", "Bangladesh"),
+    ("backend developer", "Bangladesh"),
+    ("software engineer python remote", "Worldwide"),
+]
+_LI_CARD_RE = re.compile(r'<li>.*?</li>', re.S)
+
+
+def _linkedin_field(card: str, pattern: str) -> str:
+    m = re.search(pattern, card, re.S)
+    return strip_html(m.group(1)).strip() if m else ""
+
+
+def fetch_linkedin() -> list[dict]:
+    """LinkedIn guest jobs — onsite + Bangladesh-local roles (opt-in, fragile).
+
+    Parses the public HTML job-card fragment. Each search pass targets a
+    (keywords, location) pair; results are deduped by posting URL upstream in
+    fetch_all(). Any pass that fails is logged and skipped.
+    """
+    from urllib.parse import quote
+
+    jobs: list[dict] = []
+    for keywords, location in LINKEDIN_SEARCHES:
+        url = f"{LINKEDIN_GUEST_URL}?keywords={quote(keywords)}&location={quote(location)}&f_TPR=r2592000&start=0"
+        try:
+            html_text = _get(url).decode("utf-8", errors="replace")
+        except OSError as e:
+            print(f"  [sources] linkedin '{keywords}/{location}' failed: {e}")
+            continue
+        for card in _LI_CARD_RE.findall(html_text):
+            link = _linkedin_field(card, r'base-card__full-link[^>]*href="([^"?]+)')
+            title = _linkedin_field(card, r'base-search-card__title">(.*?)</')
+            company = _linkedin_field(card, r'base-search-card__subtitle">(.*?)</')
+            loc = _linkedin_field(card, r'job-search-card__location">(.*?)</') or location
+            dt_raw = _linkedin_field(card, r'datetime="([^"]+)"')
+            if not (link and title):
+                continue
+            jobs.append(_job(
+                title=title,
+                company=company,
+                location=loc,
+                url=link,
+                description=f"{title} at {company}. Location: {loc}. (LinkedIn listing — open for full details.)",
+                dt=parse_date(dt_raw),
+                source="linkedin",
+                tags=[],
+            ))
+    return jobs
+
+
 # ── registry ──────────────────────────────────────────────
 ALL_SOURCES = {
     "remoteok": fetch_remoteok,
     "remotive": fetch_remotive,
     "arbeitnow": fetch_arbeitnow,
     "weworkremotely": fetch_weworkremotely,
+    "himalayas": fetch_himalayas,
+    "jobicy": fetch_jobicy,
+    "workingnomads": fetch_workingnomads,
     "hackernews": fetch_hackernews,
+    "linkedin": fetch_linkedin,
 }
 
-# Enabled by default. HN is opt-in (noisy, freeform) — add it via SOURCES env.
-DEFAULT_SOURCES = ["remoteok", "remotive", "arbeitnow", "weworkremotely"]
+# Enabled by default: the free, reliable, structured remote feeds.
+# Opt-in via SOURCES env (noisy or fragile):
+#   hackernews — freeform "Who is hiring" comments
+#   linkedin   — onsite + Bangladesh-local, but HTML-scraped and rate-limited
+DEFAULT_SOURCES = [
+    "remoteok", "remotive", "arbeitnow", "weworkremotely",
+    "himalayas", "jobicy", "workingnomads",
+]
 
 
 def fetch_all(source_names: list[str] | None = None) -> list[dict]:
@@ -353,3 +668,19 @@ def filter_keywords(jobs: list[dict], keywords: list[str]) -> list[dict]:
         if pattern.search(haystack):
             kept.append(job)
     return kept
+
+
+def facet_counts(jobs: list[dict]) -> dict:
+    """Tally the categorization facets across a job list.
+
+    Returns a dict of {facet: {value: count}} for work_mode, locale,
+    relocation, employment_type, and seniority. Used to give the pipeline (and
+    the run summary) a quick breakdown of what was discovered.
+    """
+    facets = ("work_mode", "locale", "relocation", "employment_type", "seniority")
+    counts: dict = {f: {} for f in facets}
+    for job in jobs:
+        for f in facets:
+            v = job.get(f, "unknown") or "unknown"
+            counts[f][v] = counts[f].get(v, 0) + 1
+    return counts

@@ -137,6 +137,23 @@
           <option value="review">Review</option>
           <option value="skip">Skip</option>
         </select>
+        <select id="filter-mode" onchange="renderJobs()"
+          class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[13px]
+                 text-slate-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-200
+                 focus:border-indigo-300 transition">
+          <option value="all">Any work mode</option>
+          <option value="remote">Remote</option>
+          <option value="hybrid">Hybrid</option>
+          <option value="onsite">Onsite</option>
+        </select>
+        <select id="filter-locale" onchange="renderJobs()"
+          class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[13px]
+                 text-slate-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-200
+                 focus:border-indigo-300 transition">
+          <option value="all">Anywhere (BD + intl)</option>
+          <option value="bangladesh">Bangladesh (local)</option>
+          <option value="international">International</option>
+        </select>
         <select id="sort-by" onchange="renderJobs()"
           class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[13px]
                  text-slate-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-200
@@ -262,6 +279,37 @@
               rounded-full ring-1 ${m.cls}">
                 <span class="w-1.5 h-1.5 rounded-full ${m.dot}"></span>${m.label}
               </span>`;
+    }
+
+    /* Categorization badges: work mode, locale, relocation, employment, salary.
+       Each is shown only when it carries a meaningful (non-"unknown") value. */
+    const WORK_MODE = {
+      remote: { label: 'Remote', cls: 'bg-sky-50 text-sky-700 ring-sky-100' },
+      onsite: { label: 'Onsite', cls: 'bg-orange-50 text-orange-700 ring-orange-100' },
+      hybrid: { label: 'Hybrid', cls: 'bg-violet-50 text-violet-700 ring-violet-100' },
+    };
+    const LOCALE = {
+      bangladesh:    { label: '🇧🇩 Local (BD)',   cls: 'bg-emerald-50 text-emerald-700 ring-emerald-100' },
+      international: { label: '🌐 International', cls: 'bg-slate-100 text-slate-600 ring-slate-200' },
+    };
+
+    function pill(text, cls) {
+      return `<span class="text-[11px] font-medium px-2 py-0.5 rounded-full ring-1 ${cls}">${text}</span>`;
+    }
+
+    function catBadges(job) {
+      const out = [];
+      const wm = WORK_MODE[job.work_mode];
+      if (wm) out.push(pill(wm.label, wm.cls));
+      const lc = LOCALE[job.locale];
+      if (lc) out.push(pill(lc.label, lc.cls));
+      if (job.relocation === 'yes')
+        out.push(pill('✈ Relocation', 'bg-teal-50 text-teal-700 ring-teal-100'));
+      if (job.employment_type && job.employment_type !== 'unknown' && job.employment_type !== 'full-time')
+        out.push(pill(esc(job.employment_type), 'bg-slate-100 text-slate-600 ring-slate-200'));
+      if (job.salary)
+        out.push(pill('💰 ' + esc(job.salary), 'bg-amber-50 text-amber-700 ring-amber-100'));
+      return out.join('');
     }
 
     function accentCls(v) {
@@ -418,9 +466,14 @@
 
     function renderJobs() {
       const verdict = document.getElementById('filter-verdict').value;
+      const mode = document.getElementById('filter-mode').value;
+      const locale = document.getElementById('filter-locale').value;
       const sort = document.getElementById('sort-by').value;
 
-      let jobs = allJobs.filter(j => verdict === 'all' || j.verdict === verdict);
+      let jobs = allJobs.filter(j =>
+        (verdict === 'all' || j.verdict === verdict) &&
+        (mode === 'all' || (j.work_mode ?? 'unknown') === mode) &&
+        (locale === 'all' || (j.locale ?? 'unknown') === locale));
       if (sort === 'score-desc') jobs.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
       else if (sort === 'score-asc') jobs.sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
       else if (sort === 'date-desc') jobs.sort((a, b) =>
@@ -465,6 +518,7 @@
             <p class="text-[13px] text-slate-500 mt-0.5">
               <span class="font-medium text-slate-600">${esc(job.company ?? '')}</span>${job.location ? ' · ' + esc(job.location) : ''}
             </p>
+            <div class="flex items-center gap-1.5 flex-wrap mt-2">${catBadges(job)}</div>
           </div>
         </div>
         ${collapse('Match reasons', job.match_reasons, 'reason')}

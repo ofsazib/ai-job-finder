@@ -84,6 +84,14 @@ class Preferences(BaseModel):
     willing_to_relocate: bool = True
 
 
+class ManualJob(BaseModel):
+    description: str
+    title: str = ""
+    company: str = ""
+    url: str = ""
+    location: str = ""
+
+
 @app.get("/api/preferences")
 async def get_preferences():
     if not PREFERENCES_FILE.exists():
@@ -100,6 +108,16 @@ async def put_preferences(body: Preferences):
     PREFERENCES_FILE.parent.mkdir(exist_ok=True)
     PREFERENCES_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return data
+
+
+@app.post("/api/jobs/manual")
+async def post_manual_job(body: ManualJob):
+    if not body.description.strip() or len(body.description) > 50_000:
+        raise HTTPException(
+            status_code=422, detail="description must contain 1-50000 characters"
+        )
+    from finder import analyze_manual_job
+    return analyze_manual_job(body.model_dump())
 
 
 @app.get("/")

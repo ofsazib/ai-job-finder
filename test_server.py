@@ -99,3 +99,7 @@ def test_preferences_default_and_round_trip(client):
     })
     assert saved.status_code == 200
     assert client.get("/api/preferences").json()["minimum_salary"] == 60000
+
+
+def test_manual_job_rejects_empty_description(client):
+    assert client.post("/api/jobs/manual", json={"description": " "}).status_code == 422

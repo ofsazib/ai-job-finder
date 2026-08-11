@@ -27,6 +27,7 @@ where judgement actually helps.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 from datetime import datetime
@@ -187,6 +188,36 @@ def _interleave_by_source(jobs: list) -> list:
     for bucket in buckets.values():
         bucket.sort(key=lambda j: j.get("posted_epoch", 0), reverse=True)
     return [j for group in zip_longest(*buckets.values()) for j in group if j is not None]
+
+
+def analyze_manual_job(data: dict) -> dict:
+    """Normalize one pasted posting and send it through the regular analyzer."""
+    description = (data.get("description") or "").strip()
+    manual_url = (data.get("url") or "").strip() or (
+        "manual:" + hashlib.sha256(description.encode()).hexdigest()[:16]
+    )
+    job = sources._job(
+        data.get("title") or "Unknown role",
+        data.get("company") or "Unknown company",
+        data.get("location") or "Remote",
+        manual_url,
+        description,
+        datetime.now().astimezone(),
+        "manual",
+        [],
+    )
+    enrich_repost_history([job])
+    profile_path = OUTPUT_DIR / "search_profile.json"
+    profile = json.loads(profile_path.read_text()) if profile_path.exists() else {}
+    previous_path = OUTPUT_DIR / "jobs.json"
+    previous = json.loads(previous_path.read_text()) if previous_path.exists() else []
+    result = analyze_jobs([job], profile=profile)[0]
+    merged = {j.get("url", ""): j for j in previous}
+    merged[result.get("url", manual_url)] = result
+    previous_path.write_text(json.dumps(
+        sorted(merged.values(), key=lambda j: j.get("score", 0), reverse=True), indent=2
+    ), encoding="utf-8")
+    return result
 
 
 # ── step 3: analyze & score via AI CLI ────────────────────

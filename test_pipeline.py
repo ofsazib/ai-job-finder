@@ -119,6 +119,24 @@ def test_run_pipeline_raises_when_resume_missing(tmp_path, monkeypatch):
         finder.run_pipeline()
 
 
+def test_analyze_manual_job_uses_shared_pipeline(tmp_path, monkeypatch):
+    import finder
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "resume.md").write_text("Python")
+    (tmp_path / "output").mkdir()
+    (tmp_path / "output/search_profile.json").write_text(json.dumps({
+        "must_have_skills": ["python"], "seniority": "senior"
+    }))
+    with patch.object(
+        finder, "analyze_jobs", return_value=[{"url": "manual:test", "score": 80}]
+    ) as analyze:
+        result = finder.analyze_manual_job({
+            "description": "Python API role", "company": "Acme"
+        })
+    assert result["score"] == 80
+    assert analyze.call_args.args[0][0]["source"] == "manual"
+
+
 def test_run_pipeline_raises_when_no_fresh_jobs(tmp_path, monkeypatch):
     import finder
     monkeypatch.chdir(tmp_path)

@@ -46,10 +46,13 @@ All free, no API key, each returns a per-posting date:
 | [Himalayas](https://himalayas.app/jobs/api) | JSON API | `pubDate` | remote; ships salary, seniority, location restrictions |
 | [Jobicy](https://jobicy.com/api/v2/remote-jobs) | JSON API | `pubDate` | remote |
 | [Working Nomads](https://www.workingnomads.com) | JSON API | `pub_date` | remote |
+| [The Muse](https://www.themuse.com/developers/api/v2) | JSON API | `publication_date` | tech roles (Software Engineering / Data Science) |
+| [Greenhouse](https://developers.greenhouse.io/job-board.html) | JSON API | `updated_at` | public company boards (Stripe, Databricks, GitLab, Figma, Vercel, …) |
+| [Lever](https://github.com/lever/postings-api) | JSON API | `createdAt` | public company boards (Netflix, Spotify, Plaid, Notion, …) |
 | Hacker News "Who is hiring" | Algolia API | `created_at_i` | opt-in (freeform comments) |
 | LinkedIn (guest jobs) | HTML | `datetime` | opt-in; **onsite + Bangladesh-local** roles, HTML-scraped & rate-limited |
 
-Seven feeds are enabled by default. `hackernews` and `linkedin` are opt-in via `SOURCES` — HN because its posts are freeform, LinkedIn because it's HTML-scraped and can rate-limit by IP. LinkedIn is the source of **onsite** and **Bangladesh-local** postings.
+Ten feeds are enabled by default. Greenhouse and Lever pull public, dated JSON from a curated list of well-known tech companies (edit `GREENHOUSE_COMPANIES` / `LEVER_COMPANIES` in `sources.py` to taste). `hackernews` and `linkedin` are opt-in via `SOURCES` — HN because its posts are freeform, LinkedIn because it's HTML-scraped and can rate-limit by IP. LinkedIn is the source of **onsite** and **Bangladesh-local** postings.
 
 ## Categorization
 

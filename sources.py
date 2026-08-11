@@ -114,6 +114,20 @@ def _norm(dt: datetime | None):
     return dt.isoformat(), int(dt.timestamp())
 
 
+def _ms_to_seconds(value):
+    """Convert an epoch-milliseconds value to seconds for parse_date().
+
+    Some APIs (Lever) return createdAt in milliseconds. A 13-digit epoch is
+    ~year 33658 if read as seconds, so parse_date would reject it. Divide down
+    when the value is clearly in millis; pass anything else through untouched.
+    """
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return value
+    return n // 1000 if n > 10_000_000_000 else n
+
+
 # ── categorization ────────────────────────────────────────
 # These derive structured facets from free-text so the UI can filter and the
 # analyzer can reason about them. Everything is best-effort with an explicit
@@ -382,6 +396,132 @@ def fetch_weworkremotely() -> list[dict]:
     return jobs
 
 
+# LaraJobs ships a structured RSS feed with custom `job:` namespace tags for
+# company / location / salary / tags — far richer than typical RSS job feeds.
+# PHP/Laravel-focused, but full-stack + general backend roles appear and the
+# keyword + skill-overlap filters drop anything the candidate can't do.
+LARAJOBS_NS = "https://larajobs.com"
+
+
+def fetch_larajobs() -> list[dict]:
+    """LaraJobs — https://larajobs.com/feed (RSS with job: namespace tags)."""
+    try:
+        root = ElementTree.fromstring(_get("https://larajobs.com/feed"))
+    except (ElementTree.ParseError, OSError) as e:
+        print(f"  [sources] larajobs feed failed: {e}")
+        return []
+    jobs = []
+    for item in root.iter("item"):
+        link = (item.findtext("link") or "").strip()
+        if not link:
+            continue
+        title = (item.findtext("title") or "").strip()
+        company = (item.findtext(f"{{{LARAJOBS_NS}}}company") or "").strip()
+        location = (item.findtext(f"{{{LARAJOBS_NS}}}location") or "Remote").strip()
+        salary = (item.findtext(f"{{{LARAJOBS_NS}}}salary") or "").strip()
+        raw_tags = item.findtext(f"{{{LARAJOBS_NS}}}tags") or ""
+        tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
+        # description lives in content:encoded; fall back to the plain description.
+        desc = (item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded")
+                or item.findtext("description") or "")
+        jobs.append(_job(
+            title=title,
+            company=company,
+            location=location or "Remote",
+            url=link,
+            description=desc,
+            dt=parse_date(item.findtext("pubDate")),
+            source="larajobs",
+            tags=tags,
+            salary=salary,
+            work_mode="remote",
+        ))
+    return jobs
+
+
+# Jobspresso is a general remote-tech board. The RSS gives title + dc:creator
+# (company name) + pubDate + description; no per-job structured fields beyond
+# that, so categorization is inferred from the description as usual.
+def fetch_jobspresso() -> list[dict]:
+    """Jobspresso — https://jobspresso.co/jobs/feed/ (RSS, pubDate per item)."""
+    try:
+        root = ElementTree.fromstring(_get("https://jobspresso.co/jobs/feed/"))
+    except (ElementTree.ParseError, OSError) as e:
+        print(f"  [sources] jobspresso feed failed: {e}")
+        return []
+    dc_ns = "http://purl.org/dc/elements/1.1/"
+    content_ns = "http://purl.org/rss/1.0/modules/content/"
+    jobs = []
+    for item in root.iter("item"):
+        link = (item.findtext("link") or "").strip()
+        if not link:
+            continue
+        # dc:creator on this feed carries the company name, sometimes with a
+        # location glyph appended ("Acme<br>⚲&nbsp;United States"). Keep only
+        # the part before the first line break / glyph.
+        company = (item.findtext(f"{{{dc_ns}}}creator") or "").strip()
+        company = re.split(r"<br>|⚲|\n", company, maxsplit=1)[0].strip()
+        desc = (item.findtext(f"{{{content_ns}}}encoded")
+                or item.findtext("description") or "")
+        jobs.append(_job(
+            title=(item.findtext("title") or "").strip(),
+            company=company,
+            location="Remote",
+            url=link,
+            description=desc,
+            dt=parse_date(item.findtext("pubDate")),
+            source="jobspresso",
+            tags=[],
+            work_mode="remote",
+        ))
+    return jobs
+
+
+# VueJobs is a Vue.js-focused board but lists many full-stack positions where
+# Vue is just one of many requirements. RSS with CDATA-wrapped title/desc.
+def fetch_vuejobs() -> list[dict]:
+    """VueJobs — https://vuejobs.com/feed (RSS, pubDate per item)."""
+    try:
+        root = ElementTree.fromstring(_get("https://vuejobs.com/feed"))
+    except (ElementTree.ParseError, OSError) as e:
+        print(f"  [sources] vuejobs feed failed: {e}")
+        return []
+    jobs = []
+    for item in root.iter("item"):
+        link = (item.findtext("link") or "").strip()
+        if not link:
+            continue
+        # The description block on this feed embeds Employer + Location as HTML.
+        desc = (item.findtext("description") or "")
+        company = _vuejobs_field(desc, "Employer") or ""
+        location = _vuejobs_field(desc, "Location") or "Remote"
+        jobs.append(_job(
+            title=(item.findtext("title") or "").strip(),
+            company=company,
+            location=location,
+            url=link,
+            description=desc,
+            dt=parse_date(item.findtext("pubDate")),
+            source="vuejobs",
+            tags=[],
+            work_mode="remote",
+        ))
+    return jobs
+
+
+_VUEJOBS_FIELD_RE = re.compile(
+    r"<strong>\s*(Employer|Location)\s*:\s*</strong>\s*([^<]+)", re.I
+)
+
+
+def _vuejobs_field(description: str, field: str) -> str:
+    """Pull Employer / Location out of the VueJobs RSS description HTML."""
+    for match_field, value in _VUEJOBS_FIELD_RE.findall(description or ""):
+        if match_field.lower() == field.lower():
+            return strip_html(value).strip()
+    return ""
+
+
 def fetch_hackernews() -> list[dict]:
     """HN 'Who is hiring' comments via the Algolia API (created_at_i per comment).
 
@@ -556,26 +696,171 @@ def fetch_linkedin() -> list[dict]:
     return jobs
 
 
+# ── company job boards (Greenhouse / Lever) ───────────────
+# Hundreds of tech companies expose their careers page as public, dated JSON
+# via Greenhouse and Lever. No key, no scraping, one board per company. We pull
+# a curated list of well-known tech employers; edit these to taste. Each board
+# is isolated — an unknown/renamed company slug just yields nothing.
+
+# Greenhouse board tokens (the {token} in job-boards.greenhouse.io/{token}).
+# Slugs verified live (returning >= 1 job) as of the last audit. Each board is
+# isolated — if a company renames its board, it just yields nothing.
+GREENHOUSE_COMPANIES = [
+    # AI labs
+    "anthropic",
+    # Big tech / payments
+    "stripe",
+    # Modern SaaS / infra
+    "vercel", "datadog", "samsara",
+    # Fintech
+    "block", "brex", "coinbase", "robinhood", "chime", "mercury",
+    # Existing well-known boards
+    "databricks", "airbnb", "gitlab", "cloudflare", "figma",
+    "instacart", "dropbox", "reddit",
+]
+# Lever company slugs (the {slug} in jobs.lever.co/{slug}).
+# Verified live; many public slugs silently 404 (Document not found) when a
+# company migrates boards, so each entry here was confirmed to return jobs.
+LEVER_COMPANIES = [
+    "spotify",        # ~99 postings
+    "toptal",         # ~23 postings — global remote, BD-friendly
+    "angellist",      # Wellfound's lever board
+]
+
+
+def fetch_greenhouse() -> list[dict]:
+    """Greenhouse — public board JSON per company (dated, no key).
+
+    https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true
+    """
+    jobs = []
+    for token in GREENHOUSE_COMPANIES:
+        url = f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
+        try:
+            data = _get_json(url)
+        except (OSError, ValueError) as e:
+            print(f"  [sources] greenhouse '{token}' failed: {e}")
+            continue
+        for item in data.get("jobs", []):
+            loc = (item.get("location") or {}).get("name") or "Remote"
+            jobs.append(_job(
+                title=item.get("title"),
+                company=token.replace("-", " ").title(),
+                location=loc,
+                url=item.get("absolute_url"),
+                description=item.get("content"),  # HTML-escaped; strip_html handles it
+                dt=parse_date(item.get("updated_at") or item.get("first_published")),
+                source="greenhouse",
+                tags=[d.get("name") for d in (item.get("departments") or []) if d.get("name")],
+            ))
+    return jobs
+
+
+def fetch_lever() -> list[dict]:
+    """Lever — public postings JSON per company (dated, no key).
+
+    https://api.lever.co/v0/postings/{slug}?mode=json
+    """
+    jobs = []
+    for slug in LEVER_COMPANIES:
+        url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
+        try:
+            data = _get_json(url)
+        except (OSError, ValueError) as e:
+            print(f"  [sources] lever '{slug}' failed: {e}")
+            continue
+        if not isinstance(data, list):
+            continue
+        for item in data:
+            cats = item.get("categories") or {}
+            loc = cats.get("location") or "Remote"
+            commitment = cats.get("commitment") or ""  # e.g. "Full-time"
+            workplace = item.get("workplaceType") or ""  # remote/onsite/hybrid
+            jobs.append(_job(
+                title=item.get("text"),
+                company=slug.replace("-", " ").title(),
+                location=loc,
+                url=item.get("hostedUrl") or item.get("applyUrl"),
+                description=item.get("descriptionPlain") or item.get("description"),
+                # Lever's createdAt is epoch *milliseconds* — parse_date treats a
+                # bare integer as seconds, so convert to seconds first.
+                dt=parse_date(_ms_to_seconds(item.get("createdAt"))),
+                source="lever",
+                tags=[t for t in (cats.get("allLocations") or []) if t],
+                work_mode=workplace.lower() if workplace else "",
+                employment_type=detect_employment_type("", commitment),
+            ))
+    return jobs
+
+
+# The Muse: free public API with a real publication_date, filterable to
+# Software Engineering. Paginated; we pull the first few pages of tech roles.
+THEMUSE_PAGES = 3
+
+
+def fetch_themuse() -> list[dict]:
+    """The Muse — https://www.themuse.com/api/public/jobs (dated, no key)."""
+    jobs = []
+    for page in range(THEMUSE_PAGES):
+        url = (
+            "https://www.themuse.com/api/public/jobs"
+            f"?category=Software%20Engineering&category=Data%20Science&page={page}"
+        )
+        try:
+            data = _get_json(url)
+        except (OSError, ValueError) as e:
+            print(f"  [sources] themuse page {page} failed: {e}")
+            break
+        results = data.get("results") or []
+        if not results:
+            break
+        for item in results:
+            locs = [l.get("name") for l in (item.get("locations") or []) if l.get("name")]
+            location = ", ".join(locs) if locs else "Remote"
+            company = (item.get("company") or {}).get("name") or ""
+            levels = [l.get("name") for l in (item.get("levels") or []) if l.get("name")]
+            jobs.append(_job(
+                title=item.get("name"),
+                company=company,
+                location=location,
+                url=(item.get("refs") or {}).get("landing_page"),
+                description=item.get("contents"),
+                dt=parse_date(item.get("publication_date")),
+                source="themuse",
+                tags=[c.get("name") for c in (item.get("categories") or []) if c.get("name")],
+                seniority=detect_seniority("", "", levels[0] if levels else ""),
+            ))
+    return jobs
+
+
 # ── registry ──────────────────────────────────────────────
 ALL_SOURCES = {
     "remoteok": fetch_remoteok,
     "remotive": fetch_remotive,
     "arbeitnow": fetch_arbeitnow,
     "weworkremotely": fetch_weworkremotely,
+    "larajobs": fetch_larajobs,
+    "jobspresso": fetch_jobspresso,
+    "vuejobs": fetch_vuejobs,
     "himalayas": fetch_himalayas,
     "jobicy": fetch_jobicy,
     "workingnomads": fetch_workingnomads,
+    "themuse": fetch_themuse,
+    "greenhouse": fetch_greenhouse,
+    "lever": fetch_lever,
     "hackernews": fetch_hackernews,
     "linkedin": fetch_linkedin,
 }
 
-# Enabled by default: the free, reliable, structured remote feeds.
-# Opt-in via SOURCES env (noisy or fragile):
+# Enabled by default: the free, reliable, structured feeds (remote job boards +
+# public company boards). Opt-in via SOURCES env (noisy or fragile):
 #   hackernews — freeform "Who is hiring" comments
 #   linkedin   — onsite + Bangladesh-local, but HTML-scraped and rate-limited
 DEFAULT_SOURCES = [
     "remoteok", "remotive", "arbeitnow", "weworkremotely",
+    "larajobs", "jobspresso", "vuejobs",
     "himalayas", "jobicy", "workingnomads",
+    "themuse", "greenhouse", "lever",
 ]
 
 

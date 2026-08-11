@@ -36,6 +36,12 @@ from dotenv import load_dotenv
 
 import sources
 from ai_cli import active_backend, run_json, run_text
+from matching import (
+    detect_ghost_job_signals,
+    disqualifier_hits,
+    hard_reject,
+    skill_overlap_score,
+)
 
 load_dotenv()
 
@@ -62,10 +68,14 @@ def _selected_sources() -> list[str] | None:
 
 # ── step 1: build search profile from resume ──────────────
 def build_search_profile() -> dict:
-    """Ask the AI CLI to distill the resume into roles + match keywords.
+    """Ask the AI CLI to distill the resume into a structured search profile.
 
-    Keywords drive the deterministic pre-filter in step 2, so the model never
-    needs to see jobs the candidate clearly can't do.
+    The profile drives three things downstream:
+      - keywords → deterministic pre-filter in step 2 (sources.filter_keywords)
+      - must_have_skills / nice_to_have_skills → skill_overlap_score in step 3
+      - seniority → hard_reject pass in step 3 (junior-only roles for seniors)
+
+    The model never sees jobs the candidate clearly can't do.
     """
     prompt = (PROMPTS_DIR / "build_profile.md").read_text(encoding="utf-8")
     profile = run_json(prompt, context="---RESUME---\n" + _resume_text())
@@ -73,11 +83,38 @@ def build_search_profile() -> dict:
     roles = profile.get("target_roles") or []
     keywords = [k.lower() for k in (profile.get("keywords") or []) if k]
     profile["keywords"] = keywords
+    # Normalize new skill fields so matching.py never has to defend against None.
+    profile["must_have_skills"] = [
+        s.lower() for s in (profile.get("must_have_skills") or []) if s
+    ]
+    profile["nice_to_have_skills"] = [
+        s.lower() for s in (profile.get("nice_to_have_skills") or []) if s
+    ]
+    profile["seniority"] = (profile.get("seniority") or "senior").lower()
+    # Normalize languages: keep as dict if model returned one, else list.
+    langs = profile.get("languages") or {}
+    if isinstance(langs, list):
+        # Convert ["english","bengali"] → {"english":"fluent","bengali":"native"}
+        # by assuming the candidate is at least fluent in anything they list.
+        langs = {l.lower(): "fluent" for l in langs if isinstance(l, str)}
+    elif isinstance(langs, dict):
+        langs = {k.lower(): v for k, v in langs.items() if isinstance(k, str)}
+    else:
+        langs = {}
+    # Defensive fallback: most software roles require English, and the resume
+    # is in English, so include it if the model forgot.
+    if not langs:
+        langs = {"english": "fluent"}
+    profile["languages"] = langs
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     (OUTPUT_DIR / "search_profile.json").write_text(json.dumps(profile, indent=2))
     print(f"  Roles: {roles}")
     print(f"  Keywords ({len(keywords)}): {', '.join(keywords[:12])}")
+    print(f"  Must-have skills ({len(profile['must_have_skills'])}): "
+          f"{', '.join(profile['must_have_skills'][:8])}")
+    print(f"  Seniority: {profile['seniority']}")
+    print(f"  Languages: {profile['languages']}")
     return profile
 
 
@@ -122,8 +159,103 @@ def _interleave_by_source(jobs: list) -> list:
 
 
 # ── step 3: analyze & score via AI CLI ────────────────────
-def analyze_jobs(jobs: list[dict]) -> list[dict]:
-    """Score each posting 0–100 against the resume; write output/jobs.json.
+# The five evaluation dimensions exposed in the dashboard. Order matters —
+# the UI renders them in this sequence.
+BLOCK_DIMENSIONS = ("stack_fit", "seniority_fit", "location_fit",
+                    "compensation", "culture_fit")
+
+
+def _normalize_blocks(raw) -> dict:
+    """Coerce LLM output into a uniform blocks dict.
+
+    The analyzer may omit ``blocks`` (older prompt) or return partial data.
+    Missing dimensions default to score 0 + empty note; the UI hides empty
+    blocks. Malformed entries are dropped rather than crashing the merge.
+    """
+    out: dict = {}
+    if not isinstance(raw, dict):
+        return out
+    for dim in BLOCK_DIMENSIONS:
+        entry = raw.get(dim)
+        if not isinstance(entry, dict):
+            continue
+        try:
+            score = int(entry.get("score", 0) or 0)
+        except (TypeError, ValueError):
+            score = 0
+        score = max(0, min(100, score))
+        note = str(entry.get("notes") or entry.get("note") or "").strip()
+        out[dim] = {"score": score, "notes": note}
+    return out
+
+
+def _hard_reject_pass(jobs: list[dict], profile: dict) -> tuple[list[dict], list[dict]]:
+    """Drop jobs that are unworkable regardless of stack match.
+
+    Hard rejects: clearance/citizenship/export-control requirements,
+    region-locked onsite with no relocation, region-restricted remote roles
+    (e.g. "US only" for a Bangladesh-based candidate), required languages the
+    candidate doesn't speak, and junior/intern-only roles for a senior
+    candidate. Each rejected job is recorded with a synthetic score of 0 so
+    the dashboard can still surface what was filtered and why.
+
+    Ghost-job signals (staffing agency, off-platform apply, etc.) are SOFT —
+    attached to kept jobs so the LLM can weigh them in scoring, but never
+    used to hard-reject (one false positive would cost a real opportunity).
+
+    Returns ``(kept, rejected)``.
+    """
+    seniority = (profile.get("seniority") or "senior").lower()
+    regions = profile.get("region_eligibility") or ["bangladesh", "worldwide"]
+    languages = profile.get("languages") or {"english": "fluent"}
+    kept, rejected = [], []
+    for job in jobs:
+        bad, hits = hard_reject(
+            job, seniority,
+            candidate_regions=regions,
+            candidate_languages=languages,
+        )
+        if bad:
+            job.update({
+                "score": 0,
+                "verdict": "skip",
+                "match_reasons": [],
+                "red_flags": [f"hard-rejected: {h}" for h in hits],
+                "suggested_angle": "",
+                "skill_overlap_score": 0,
+                "disqualifier_hits": hits,
+                "ghost_job_signals": [],
+                "blocks": {},
+            })
+            rejected.append(job)
+        else:
+            # Attach code-computed signals so the analyzer prompt + the merged
+            # output both carry them. Soft hits + ghost signals are kept here
+            # so the LLM can weigh them in scoring.
+            job["skill_overlap_score"] = skill_overlap_score(
+                job,
+                profile.get("must_have_skills") or [],
+                profile.get("nice_to_have_skills") or [],
+            )
+            job["disqualifier_hits"] = disqualifier_hits(job)
+            job["ghost_job_signals"] = detect_ghost_job_signals(job)
+            kept.append(job)
+    return kept, rejected
+
+
+def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
+    """Score each posting 0-100 against the resume; write output/jobs.json.
+
+    Pipeline within this step:
+      a. Hard-reject pass (code) drops clearance/citizenship/junior-only.
+      b. Each surviving job gets a deterministic skill_overlap_score and any
+         soft disqualifier_hits attached in code — these go into the prompt as
+         ground truth so the LLM cannot hallucinate stack fit.
+      c. The LLM scores 0-100 with its own judgement layered on top.
+      d. Final score blends the two: 70% LLM (judgement on seniority, location,
+         domain) + 30% skill_overlap (ground-truth stack coverage). A job the
+         LLM rates 85 but with skill_overlap 30 ends up at ~68 — protecting
+         against the model's tendency to be swayed by brand names.
 
     Jobs are passed inline as JSON context (not via a file tool) so this works
     identically across every CLI backend. The model returns scoring metadata
@@ -132,10 +264,20 @@ def analyze_jobs(jobs: list[dict]) -> list[dict]:
     """
     today = datetime.now().strftime("%Y-%m-%d")
     prompt = (PROMPTS_DIR / "analyze.md").read_text(encoding="utf-8")
+    profile = profile or {}
+
+    kept, rejected = _hard_reject_pass(jobs, profile)
+    if rejected:
+        print(f"  Hard-rejected {len(rejected)} job(s) in code (disqualifiers)")
+    if not kept:
+        print("  No jobs survived the hard-reject pass")
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        (OUTPUT_DIR / "jobs.json").write_text(json.dumps(rejected, indent=2))
+        return rejected
 
     # Give the model only what it needs to judge — keep the payload small, but
-    # include the derived categorization so it can weigh work mode, locale,
-    # relocation support, seniority, and salary in its scoring.
+    # include the derived categorization AND the code-computed skill_overlap /
+    # disqualifier_hits so its scoring is anchored to ground truth.
     slim = [
         {
             "url": j["url"],
@@ -150,9 +292,13 @@ def analyze_jobs(jobs: list[dict]) -> list[dict]:
             "employment_type": j.get("employment_type", "unknown"),
             "seniority": j.get("seniority", "unknown"),
             "salary": j.get("salary", ""),
+            "location_restrictions": j.get("location_restrictions", []),
+            "skill_overlap_score": j.get("skill_overlap_score", 0),
+            "disqualifier_hits": j.get("disqualifier_hits", []),
+            "ghost_job_signals": j.get("ghost_job_signals", []),
             "description": j["description"],
         }
-        for j in jobs
+        for j in kept
     ]
     context = (
         f"Today's date is {today}.\n"
@@ -163,13 +309,19 @@ def analyze_jobs(jobs: list[dict]) -> list[dict]:
     if not isinstance(scored, list):
         raise RuntimeError("Analyzer did not return a JSON array of jobs.")
 
-    by_url = {j["url"]: j for j in jobs}
+    by_url = {j["url"]: j for j in kept}
     merged: list[dict] = []
     for entry in scored:
         if not isinstance(entry, dict):
             continue
         url = (entry.get("url") or "").strip()
         base = by_url.get(url, {})
+        llm_score = int(entry.get("score", 0) or 0)
+        skill = int(base.get("skill_overlap_score", 0) or 0)
+        # Blend: LLM judgement weighted higher, but skill_overlap anchors it.
+        # Floor at 0 / cap at 100; never let a high LLM score paper over a
+        # 20-skill_overlap posting.
+        final = max(0, min(100, int(round(llm_score * 0.7 + skill * 0.3))))
         merged.append({
             "title": entry.get("title") or base.get("title", ""),
             "company": entry.get("company") or base.get("company", ""),
@@ -185,13 +337,25 @@ def analyze_jobs(jobs: list[dict]) -> list[dict]:
             "seniority": base.get("seniority", "unknown"),
             "salary": base.get("salary", ""),
             "location_restrictions": base.get("location_restrictions", []),
-            "score": entry.get("score", 0),
+            # Scoring: surface both signals + the blended final.
+            "skill_overlap_score": skill,
+            "llm_score": llm_score,
+            "disqualifier_hits": base.get("disqualifier_hits", []),
+            "ghost_job_signals": base.get("ghost_job_signals", []),
+            # Per-dimension breakdown (5-block structured eval). Defaults to
+            # neutral when the LLM omits it — UI degrades gracefully to a
+            # single overall score when blocks are empty.
+            "blocks": _normalize_blocks(entry.get("blocks")),
+            "score": final,
             "verdict": entry.get("verdict", "review"),
             "match_reasons": entry.get("match_reasons", []),
             "red_flags": entry.get("red_flags", []),
             "suggested_angle": entry.get("suggested_angle", ""),
         })
 
+    # Append hard-rejected jobs (with score 0) so the dashboard can surface them
+    # behind a filter; they sort to the bottom naturally.
+    merged.extend(rejected)
     merged.sort(key=lambda j: j.get("score", 0), reverse=True)
     OUTPUT_DIR.mkdir(exist_ok=True)
     (OUTPUT_DIR / "jobs.json").write_text(json.dumps(merged, indent=2))
@@ -256,7 +420,7 @@ def run_pipeline(on_progress=None) -> dict:
     emit(2, "Discovering fresh jobs", "done")
 
     emit(3, "Analyzing & scoring", "running")
-    all_jobs = analyze_jobs(jobs)
+    all_jobs = analyze_jobs(jobs, profile=profile)
     emit(3, "Analyzing & scoring", "done")
 
     emit(4, "Generating cover letters", "running")

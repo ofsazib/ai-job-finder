@@ -102,6 +102,22 @@ def test_detect_employment_type():
     assert sources.detect_employment_type("we build things") == "unknown"
 
 
+def test_ms_to_seconds_converts_only_millis():
+    # 13-digit epoch millis (Lever createdAt) → seconds
+    assert sources._ms_to_seconds(1_784_541_602_000) == 1_784_541_602
+    # 10-digit epoch seconds passes through untouched
+    assert sources._ms_to_seconds(1_784_541_602) == 1_784_541_602
+    # junk passes through for parse_date to reject
+    assert sources._ms_to_seconds(None) is None
+
+
+def test_lever_millis_date_survives_freshness_filter():
+    # Regression: Lever createdAt is epoch millis; a bare int read as seconds
+    # overflows and gets dropped. _ms_to_seconds must keep it dated.
+    dt = sources.parse_date(sources._ms_to_seconds(1_784_541_602_000))
+    assert dt is not None and dt.year == 2026
+
+
 def test_format_salary():
     assert sources.format_salary(114000, 185000, "USD", "annual") == "USD 114k–185k/annual"
     assert sources.format_salary(90000, None, "EUR", "") == "EUR 90k"

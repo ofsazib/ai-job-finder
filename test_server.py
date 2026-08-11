@@ -47,12 +47,17 @@ def test_get_jobs_status_defaults_to_none(client, tmp_path):
 def test_post_status_saves_and_clears(client, tmp_path):
     r = client.post("/api/status", json={"url": "https://x.com", "status": "applied"})
     assert r.status_code == 200
-    saved = json.loads((tmp_path / "output" / "status.json").read_text())
-    assert saved == {"https://x.com": "applied"}
+    entry = json.loads(
+        (tmp_path / "output" / "status.json").read_text()
+    )["https://x.com"]
+    assert entry["status"] == "applied"
+    assert entry["applied_at"]
+    assert entry["updated_at"]
+    assert entry["stages"] == []
+    assert entry["outcome"] == ""
 
     client.post("/api/status", json={"url": "https://x.com", "status": "none"})
-    saved = json.loads((tmp_path / "output" / "status.json").read_text())
-    assert saved == {}
+    assert json.loads((tmp_path / "output" / "status.json").read_text()) == {}
 
 
 def test_post_status_rejects_invalid(client):

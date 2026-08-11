@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+.worktrees/
 
 # Secrets & personal data
 .env

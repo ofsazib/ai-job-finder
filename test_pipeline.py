@@ -65,6 +65,26 @@ def _mock_raw_jobs():
     }]
 
 
+def test_enrich_repost_history_marks_second_url(tmp_path, monkeypatch):
+    import finder
+    monkeypatch.chdir(tmp_path)
+    first = {"company": "Acme", "title": "Backend Engineer", "url": "https://a/1"}
+    second = {**first, "url": "https://a/2"}
+
+    initial = finder.enrich_repost_history(
+        [first], now="2026-08-01T00:00:00+00:00"
+    )[0]
+    assert initial["is_repost"] is False
+    assert initial["repost_count"] == 1
+
+    repost = finder.enrich_repost_history(
+        [second], now="2026-08-11T00:00:00+00:00"
+    )[0]
+    assert repost["is_repost"] is True
+    assert repost["repost_count"] == 2
+    assert repost["first_seen_at"] == "2026-08-01T00:00:00+00:00"
+
+
 def test_run_pipeline_emits_all_steps(tmp_path, monkeypatch):
     import finder
     monkeypatch.chdir(tmp_path)

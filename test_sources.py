@@ -3,6 +3,18 @@ from datetime import datetime, timezone
 import sources
 
 
+def test_job_fingerprint_normalizes_title_and_company():
+    a = {"company": "Acme, Inc.", "title": "Senior Python Engineer (Remote)"}
+    b = {"company": "ACME", "title": "Senior Python Engineer"}
+    assert sources.job_fingerprint(a) == sources.job_fingerprint(b)
+
+
+def test_job_fingerprint_keeps_companies_distinct():
+    title = "Senior Python Engineer"
+    assert sources.job_fingerprint({"company": "Acme", "title": title}) != \
+        sources.job_fingerprint({"company": "Globex", "title": title})
+
+
 def test_parse_date_handles_epoch_iso_and_rfc822():
     epoch = sources.parse_date(1784541602)
     assert epoch is not None and epoch.tzinfo is not None

@@ -40,8 +40,10 @@ schema drift) logs a warning and returns [] — one bad feed never sinks a run.
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 import re
+import unicodedata
 import urllib.request
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -50,6 +52,19 @@ from xml.etree import ElementTree
 USER_AGENT = "ai-job-finder/1.0 (+https://github.com/ofsazib)"
 FETCH_TIMEOUT = 30
 DESCRIPTION_MAX = 1500
+
+
+def job_fingerprint(job: dict) -> str:
+    """Stable probable-role identity; URL remains the exact identity."""
+    company = unicodedata.normalize("NFKD", job.get("company", "")).casefold()
+    title = unicodedata.normalize("NFKD", job.get("title", "")).casefold()
+    company = re.sub(r"\b(inc|incorporated|llc|ltd|limited|corp|corporation)\b\.?", "", company)
+    title = re.sub(r"\s*[\[(](remote|hybrid|onsite|on-site)[\])]\s*$", "", title)
+
+    def clean(value: str) -> str:
+        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9+#.]+", " ", value)).strip()
+
+    return hashlib.sha256(f"{clean(company)}\0{clean(title)}".encode()).hexdigest()[:16]
 
 
 # ── http ──────────────────────────────────────────────────

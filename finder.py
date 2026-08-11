@@ -134,11 +134,41 @@ def discover_jobs(profile: dict) -> list[dict]:
     # Interleave sources round-robin (freshest first within each) before
     # capping, so one feed's same-day flood can't crowd every other source out
     # of the analysis budget.
-    ranked = _interleave_by_source(matched)
+    ranked = _interleave_by_source(enrich_repost_history(matched))
     if len(ranked) > MAX_JOBS_TO_ANALYZE:
         print(f"  Capping to {MAX_JOBS_TO_ANALYZE} for analysis (round-robin across sources)")
         ranked = ranked[:MAX_JOBS_TO_ANALYZE]
     return ranked
+
+
+def enrich_repost_history(jobs: list[dict], now: str | None = None) -> list[dict]:
+    """Attach cross-run observation metadata without hiding probable reposts."""
+    path = OUTPUT_DIR / "job_history.json"
+    history = json.loads(path.read_text()) if path.exists() else {}
+    seen_at = now or datetime.now().astimezone().isoformat()
+
+    for job in jobs:
+        fingerprint = sources.job_fingerprint(job)
+        url = job.get("url", "")
+        entry = history.setdefault(fingerprint, {
+            "first_seen_at": seen_at,
+            "last_seen_at": seen_at,
+            "urls": [],
+        })
+        if url and url not in entry["urls"]:
+            entry["urls"].append(url)
+        entry["last_seen_at"] = seen_at
+        entry["observation_count"] = len(entry["urls"])
+        job.update({
+            "fingerprint": fingerprint,
+            "is_repost": len(entry["urls"]) > 1,
+            "repost_count": len(entry["urls"]),
+            "first_seen_at": entry["first_seen_at"],
+        })
+
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    path.write_text(json.dumps(history, indent=2), encoding="utf-8")
+    return jobs
 
 
 def _interleave_by_source(jobs: list) -> list:
@@ -337,6 +367,10 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
             "seniority": base.get("seniority", "unknown"),
             "salary": base.get("salary", ""),
             "location_restrictions": base.get("location_restrictions", []),
+            "fingerprint": base.get("fingerprint", ""),
+            "is_repost": base.get("is_repost", False),
+            "repost_count": base.get("repost_count", 1),
+            "first_seen_at": base.get("first_seen_at", ""),
             # Scoring: surface both signals + the blended final.
             "skill_overlap_score": skill,
             "llm_score": llm_score,

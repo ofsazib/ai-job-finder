@@ -80,3 +80,22 @@ def test_cover_letter_returns_content(client, tmp_path):
     r = client.get("/api/cover-letter", params={"company": "Acme", "title": "Backend Engineer"})
     assert r.status_code == 200
     assert "great fit" in r.json()["content"]
+
+
+def test_preferences_default_and_round_trip(client):
+    defaults = client.get("/api/preferences")
+    assert defaults.status_code == 200
+    assert defaults.json()["employment_types"] == []
+
+    saved = client.put("/api/preferences", json={
+        "employment_types": ["full-time"],
+        "work_modes": ["remote"],
+        "preferred_domains": ["healthtech"],
+        "avoided_terms": ["unpaid"],
+        "minimum_salary": 60000,
+        "salary_currency": "USD",
+        "allow_on_call": False,
+        "willing_to_relocate": False,
+    })
+    assert saved.status_code == 200
+    assert client.get("/api/preferences").json()["minimum_salary"] == 60000

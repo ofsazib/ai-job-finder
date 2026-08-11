@@ -162,6 +162,29 @@ def test_analyze_jobs_merges_scores_onto_full_records(tmp_path, monkeypatch):
     assert written == merged
 
 
+def test_analyze_jobs_applies_saved_preferences(tmp_path, monkeypatch):
+    import finder
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "resume.md").write_text("# Resume")
+    (tmp_path / "output").mkdir()
+    (tmp_path / "output/preferences.json").write_text(json.dumps({
+        "work_modes": ["remote"],
+    }))
+    profile = {"must_have_skills": ["python", "fastapi"],
+               "nice_to_have_skills": [], "seniority": "senior"}
+    model_out = [{
+        "url": "https://acme.example/jobs/1", "score": 91,
+        "verdict": "apply", "match_reasons": [], "red_flags": [],
+        "suggested_angle": "",
+    }]
+    jobs = _mock_raw_jobs()
+    jobs[0]["work_mode"] = "remote"
+    with patch.object(finder, "run_json", return_value=model_out):
+        job = finder.analyze_jobs(jobs, profile=profile)[0]
+    assert job["preference_adjustment"] == 2
+    assert job["score"] == 90
+
+
 def test_analyze_jobs_hard_rejects_clearance_jobs(tmp_path, monkeypatch):
     """A clearance-required job is dropped before LLM scoring (no tokens spent)."""
     import finder

@@ -83,6 +83,11 @@
         </div>
       </div>
 
+      <button onclick="openPreferences()"
+        class="w-full mt-3 border border-slate-200 hover:bg-slate-50 text-slate-600 font-medium px-4 py-2 rounded-xl text-sm">
+        Preferences
+      </button>
+
       <button id="run-btn" onclick="runAgent()"
         class="group w-full bg-gradient-to-br from-indigo-500 to-violet-600
                hover:from-indigo-600 hover:to-violet-700 active:scale-[0.98]
@@ -245,6 +250,39 @@
         <div id="jobs-list"></div>
       </div>
     </main>
+  </div>
+
+  <!-- Preferences Modal -->
+  <div id="preferences-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <form onsubmit="savePreferences(event)" class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="font-bold text-slate-900">Job preferences</h3>
+        <button type="button" aria-label="Close preferences" onclick="closePreferences()" class="text-xl text-slate-400">&times;</button>
+      </div>
+      <label class="block text-xs font-semibold text-slate-600">Allowed employment types
+        <input id="pref-employment" class="mt-1 w-full border rounded-lg px-3 py-2 font-normal" placeholder="full-time, contract">
+      </label>
+      <label class="block text-xs font-semibold text-slate-600">Preferred work modes
+        <input id="pref-modes" class="mt-1 w-full border rounded-lg px-3 py-2 font-normal" placeholder="remote, hybrid">
+      </label>
+      <label class="block text-xs font-semibold text-slate-600">Preferred domains
+        <input id="pref-domains" class="mt-1 w-full border rounded-lg px-3 py-2 font-normal" placeholder="healthtech, ecommerce">
+      </label>
+      <label class="block text-xs font-semibold text-slate-600">Avoided terms
+        <input id="pref-avoided" class="mt-1 w-full border rounded-lg px-3 py-2 font-normal" placeholder="unpaid, commission only">
+      </label>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="text-xs font-semibold text-slate-600">Minimum salary
+          <input id="pref-salary" type="number" min="0" class="mt-1 w-full border rounded-lg px-3 py-2 font-normal">
+        </label>
+        <label class="text-xs font-semibold text-slate-600">Currency
+          <input id="pref-currency" maxlength="3" class="mt-1 w-full border rounded-lg px-3 py-2 font-normal" value="USD">
+        </label>
+      </div>
+      <label class="flex gap-2 text-sm"><input id="pref-oncall" type="checkbox"> Allow on-call roles</label>
+      <label class="flex gap-2 text-sm"><input id="pref-relocate" type="checkbox"> Willing to relocate</label>
+      <button class="w-full bg-indigo-600 text-white rounded-lg py-2 font-semibold">Save preferences</button>
+    </form>
   </div>
 
   <!-- Cover Letter Modal -->
@@ -746,6 +784,40 @@
 
     function closeCL() {
       document.getElementById('cl-modal').classList.add('hidden');
+    }
+
+    const csv = id => document.getElementById(id).value.split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+
+    async function openPreferences() {
+      const p = await fetch('/api/preferences').then(r => r.json());
+      document.getElementById('pref-employment').value = p.employment_types.join(', ');
+      document.getElementById('pref-modes').value = p.work_modes.join(', ');
+      document.getElementById('pref-domains').value = p.preferred_domains.join(', ');
+      document.getElementById('pref-avoided').value = p.avoided_terms.join(', ');
+      document.getElementById('pref-salary').value = p.minimum_salary;
+      document.getElementById('pref-currency').value = p.salary_currency;
+      document.getElementById('pref-oncall').checked = p.allow_on_call;
+      document.getElementById('pref-relocate').checked = p.willing_to_relocate;
+      document.getElementById('preferences-modal').classList.remove('hidden');
+    }
+
+    function closePreferences() {
+      document.getElementById('preferences-modal').classList.add('hidden');
+    }
+
+    async function savePreferences(event) {
+      event.preventDefault();
+      const body = {
+        employment_types: csv('pref-employment'), work_modes: csv('pref-modes'),
+        preferred_domains: csv('pref-domains'), avoided_terms: csv('pref-avoided'),
+        minimum_salary: Number(document.getElementById('pref-salary').value || 0),
+        salary_currency: document.getElementById('pref-currency').value.trim().toUpperCase() || 'USD',
+        allow_on_call: document.getElementById('pref-oncall').checked,
+        willing_to_relocate: document.getElementById('pref-relocate').checked,
+      };
+      const res = await fetch('/api/preferences', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+      if (!res.ok) return showError('Could not save preferences.');
+      closePreferences();
     }
 
     document.addEventListener('keydown', e => {

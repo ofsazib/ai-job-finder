@@ -8,12 +8,14 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
+from matching import DEFAULT_PREFERENCES
 
 app = FastAPI(title="AI Job Finder")
 
 STATUS_FILE = Path("output/status.json")
 JOBS_FILE = Path("output/jobs.json")
 COVER_LETTERS_DIR = Path("output/cover_letters")
+PREFERENCES_FILE = Path("output/preferences.json")
 
 run_lock = threading.Lock()
 
@@ -69,6 +71,35 @@ def _read_status() -> dict:
 def _write_status(data: dict) -> None:
     STATUS_FILE.parent.mkdir(exist_ok=True)
     STATUS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+class Preferences(BaseModel):
+    employment_types: list[str] = []
+    work_modes: list[str] = []
+    preferred_domains: list[str] = []
+    avoided_terms: list[str] = []
+    minimum_salary: int = 0
+    salary_currency: str = "USD"
+    allow_on_call: bool = True
+    willing_to_relocate: bool = True
+
+
+@app.get("/api/preferences")
+async def get_preferences():
+    if not PREFERENCES_FILE.exists():
+        return DEFAULT_PREFERENCES
+    raw = json.loads(PREFERENCES_FILE.read_text(encoding="utf-8"))
+    return {**DEFAULT_PREFERENCES, **raw}
+
+
+@app.put("/api/preferences")
+async def put_preferences(body: Preferences):
+    if body.minimum_salary < 0:
+        raise HTTPException(status_code=400, detail="minimum_salary must be non-negative")
+    data = body.model_dump()
+    PREFERENCES_FILE.parent.mkdir(exist_ok=True)
+    PREFERENCES_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return data
 
 
 @app.get("/")

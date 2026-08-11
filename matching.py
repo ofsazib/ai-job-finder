@@ -24,6 +24,56 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
+DEFAULT_PREFERENCES = {
+    "employment_types": [],
+    "work_modes": [],
+    "preferred_domains": [],
+    "avoided_terms": [],
+    "minimum_salary": 0,
+    "salary_currency": "USD",
+    "allow_on_call": True,
+    "willing_to_relocate": True,
+}
+
+
+def evaluate_preferences(job: dict, preferences: dict | None) -> dict:
+    """Return explicit deal-breakers and a small, explainable fit adjustment."""
+    prefs = {**DEFAULT_PREFERENCES, **(preferences or {})}
+    hard_rejects: list[str] = []
+    reasons: list[str] = []
+    adjustment = 0
+
+    allowed_types = prefs.get("employment_types") or []
+    employment_type = job.get("employment_type", "unknown")
+    if allowed_types and employment_type not in ("", "unknown") \
+            and employment_type not in allowed_types:
+        hard_rejects.append(f"employment_type:{employment_type}")
+
+    blob = _norm_text([job.get("title", ""), job.get("description", "")])
+    for term in prefs.get("avoided_terms") or []:
+        if _whole_token(blob, term):
+            hard_rejects.append(f"avoided_term:{term.lower()}")
+    if not prefs.get("allow_on_call", True) and re.search(r"\bon[\s-]?call\b", blob):
+        hard_rejects.append("on_call_required")
+    if (not prefs.get("willing_to_relocate", True)
+            and job.get("work_mode") in ("onsite", "hybrid")
+            and job.get("locale") == "international"):
+        hard_rejects.append("relocation_required")
+
+    if job.get("work_mode") in (prefs.get("work_modes") or []):
+        adjustment += 2
+        reasons.append(f"preferred work mode: {job.get('work_mode')}")
+    for domain in prefs.get("preferred_domains") or []:
+        if _whole_token(blob, domain):
+            adjustment += 2
+            reasons.append(f"preferred domain: {domain.lower()}")
+
+    return {
+        "hard_rejects": list(dict.fromkeys(hard_rejects)),
+        "adjustment": max(-10, min(10, adjustment)),
+        "reasons": reasons,
+    }
+
 # ── disqualifier patterns ─────────────────────────────────
 # Region/citizenship blockers — applies to a Bangladesh-based candidate who is
 # neither a US citizen nor cleared. A posting that trips any of these is almost

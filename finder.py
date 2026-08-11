@@ -39,6 +39,7 @@ from ai_cli import active_backend, run_json, run_text
 from matching import (
     detect_ghost_job_signals,
     disqualifier_hits,
+    evaluate_preferences,
     hard_reject,
     skill_overlap_score,
 )
@@ -219,7 +220,9 @@ def _normalize_blocks(raw) -> dict:
     return out
 
 
-def _hard_reject_pass(jobs: list[dict], profile: dict) -> tuple[list[dict], list[dict]]:
+def _hard_reject_pass(
+    jobs: list[dict], profile: dict, preferences: dict | None = None
+) -> tuple[list[dict], list[dict]]:
     """Drop jobs that are unworkable regardless of stack match.
 
     Hard rejects: clearance/citizenship/export-control requirements,
@@ -245,6 +248,12 @@ def _hard_reject_pass(jobs: list[dict], profile: dict) -> tuple[list[dict], list
             candidate_regions=regions,
             candidate_languages=languages,
         )
+        preference = evaluate_preferences(job, preferences)
+        if preference["hard_rejects"]:
+            bad = True
+            hits = [*hits, *preference["hard_rejects"]]
+        job["preference_adjustment"] = preference["adjustment"]
+        job["preference_reasons"] = preference["reasons"]
         if bad:
             job.update({
                 "score": 0,
@@ -296,7 +305,9 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
     prompt = (PROMPTS_DIR / "analyze.md").read_text(encoding="utf-8")
     profile = profile or {}
 
-    kept, rejected = _hard_reject_pass(jobs, profile)
+    preferences_path = OUTPUT_DIR / "preferences.json"
+    preferences = json.loads(preferences_path.read_text()) if preferences_path.exists() else {}
+    kept, rejected = _hard_reject_pass(jobs, profile, preferences)
     if rejected:
         print(f"  Hard-rejected {len(rejected)} job(s) in code (disqualifiers)")
     if not kept:
@@ -351,7 +362,10 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
         # Blend: LLM judgement weighted higher, but skill_overlap anchors it.
         # Floor at 0 / cap at 100; never let a high LLM score paper over a
         # 20-skill_overlap posting.
-        final = max(0, min(100, int(round(llm_score * 0.7 + skill * 0.3))))
+        preference_adjustment = int(base.get("preference_adjustment", 0) or 0)
+        final = max(0, min(100, int(round(
+            llm_score * 0.7 + skill * 0.3 + preference_adjustment
+        ))))
         merged.append({
             "title": entry.get("title") or base.get("title", ""),
             "company": entry.get("company") or base.get("company", ""),
@@ -376,6 +390,8 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
             "llm_score": llm_score,
             "disqualifier_hits": base.get("disqualifier_hits", []),
             "ghost_job_signals": base.get("ghost_job_signals", []),
+            "preference_adjustment": preference_adjustment,
+            "preference_reasons": base.get("preference_reasons", []),
             # Per-dimension breakdown (5-block structured eval). Defaults to
             # neutral when the LLM omits it — UI degrades gracefully to a
             # single overall score when blocks are empty.

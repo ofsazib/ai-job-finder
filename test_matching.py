@@ -1,6 +1,33 @@
 import matching
 
 
+def test_evaluate_preferences_rejects_avoided_contract():
+    job = {"employment_type": "contract", "description": "rotation on call"}
+    result = matching.evaluate_preferences(
+        job, {"employment_types": ["full-time"]}
+    )
+    assert result == {
+        "hard_rejects": ["employment_type:contract"],
+        "adjustment": 0,
+        "reasons": [],
+    }
+
+
+def test_evaluate_preferences_rewards_preferred_domain_and_mode():
+    result = matching.evaluate_preferences(
+        {"description": "healthtech platform", "work_mode": "remote"},
+        {"preferred_domains": ["healthtech"], "work_modes": ["remote"]},
+    )
+    assert result["adjustment"] == 4
+    assert len(result["reasons"]) == 2
+
+
+def test_evaluate_preferences_defaults_are_neutral():
+    assert matching.evaluate_preferences({}, {}) == {
+        "hard_rejects": [], "adjustment": 0, "reasons": []
+    }
+
+
 # ── skill_overlap_score ───────────────────────────────────
 def test_skill_overlap_full_match_must_have():
     job = {"title": "Backend Engineer", "tags": ["python", "django"],

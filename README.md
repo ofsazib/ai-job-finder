@@ -90,26 +90,44 @@ The dashboard has sidebar filters for work mode and locale (e.g. show only **Loc
 - **Configurable AI CLI** — `claude`, `codex`, or `opencode` for resume analysis, scoring, and cover letters (set via `AI_CLI`)
 - **Vanilla JS + Tailwind** — zero-build single-file UI
 
-## Setup
+## Quick start
 
-Requirements: Python 3.10+ and at least one of the CLIs installed and authenticated: `claude`, `codex`, or `opencode`.
-
-```bash
-pip install -r requirements.txt
-cp .env.example .env        # choose your AI_CLI and options
-```
-
-Then add your own `resume.md` in the project root (gitignored — it never leaves your machine).
-
-## Run
+You need Python 3.10+ and one authenticated AI CLI: `claude`, `codex`, or `opencode`.
 
 ```bash
-# Web dashboard
-python server.py            # → http://127.0.0.1:8000
-
-# Or headless
-python finder.py
+git clone <repository-url>
+cd ai-job-finder
+make setup
 ```
+
+Then:
+
+1. Put your resume in `resume.md` at the project root.
+2. Open `.env` and set `AI_CLI` to the CLI you installed.
+3. Start the dashboard:
+
+```bash
+make run
+```
+
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000), then click **Find Jobs**. The first run can take several minutes because it fetches public sources and asks the AI CLI to score matches.
+
+To run without the dashboard:
+
+```bash
+make find
+```
+
+If `make` is unavailable, use the direct commands:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env
+.venv/bin/python server.py
+```
+
+Your resume, configuration, results, source cache, and application data stay local and are ignored by Git.
 
 Results land in `output/` (gitignored): `jobs.json`, `raw_jobs.json`, `discovery_report.json`, cached public source pages, and `cover_letters/`.
 
@@ -132,7 +150,7 @@ All optional, via `.env` or environment:
 ## Tests
 
 ```bash
-pytest
+make test
 ```
 
 ## Project structure

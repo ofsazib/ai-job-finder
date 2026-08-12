@@ -382,21 +382,30 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
         raise RuntimeError("Analyzer did not return a JSON array of jobs.")
 
     by_url = {j["url"]: j for j in kept}
+    scored_by_url = {
+        (entry.get("url") or "").strip(): entry
+        for entry in scored
+        if isinstance(entry, dict)
+        and (entry.get("url") or "").strip() in by_url
+    }
+    if not scored_by_url:
+        raise RuntimeError("Analyzer returned no known jobs; previous results preserved.")
+
     merged: list[dict] = []
-    for entry in scored:
-        if not isinstance(entry, dict):
-            continue
-        url = (entry.get("url") or "").strip()
-        base = by_url.get(url, {})
-        llm_score = int(entry.get("score", 0) or 0)
+    for url, base in by_url.items():
+        entry = scored_by_url.get(url)
+        analysis_missing = entry is None
+        entry = entry or {}
         skill = int(base.get("skill_overlap_score", 0) or 0)
+        llm_score = None if analysis_missing else int(entry.get("score", 0) or 0)
         # Blend: LLM judgement weighted higher, but skill_overlap anchors it.
         # Floor at 0 / cap at 100; never let a high LLM score paper over a
         # 20-skill_overlap posting.
         preference_adjustment = int(base.get("preference_adjustment", 0) or 0)
-        final = max(0, min(100, int(round(
-            llm_score * 0.7 + skill * 0.3 + preference_adjustment
-        ))))
+        final = max(0, min(100, skill + preference_adjustment)) if analysis_missing else \
+            max(0, min(100, int(round(
+                llm_score * 0.7 + skill * 0.3 + preference_adjustment
+            ))))
         merged.append({
             "title": entry.get("title") or base.get("title", ""),
             "company": entry.get("company") or base.get("company", ""),
@@ -428,9 +437,9 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
             # single overall score when blocks are empty.
             "blocks": _normalize_blocks(entry.get("blocks")),
             "score": final,
-            "verdict": entry.get("verdict", "review"),
+            "verdict": "review" if analysis_missing else entry.get("verdict", "review"),
             "match_reasons": entry.get("match_reasons", []),
-            "red_flags": entry.get("red_flags", []),
+            "red_flags": ["analysis_missing"] if analysis_missing else entry.get("red_flags", []),
             "suggested_angle": entry.get("suggested_angle", ""),
         })
 

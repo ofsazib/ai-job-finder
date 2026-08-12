@@ -17,7 +17,7 @@ Categorization (derived in code from the posting):
 Code-computed matching signals (deterministic — trust these over your own gut read of the description):
 - "skill_overlap_score": 0-100 — how many of the candidate's must-have and nice-to-have skills appear in the posting. Computed by literal token matching in code. This is ground truth for stack coverage; do NOT override it without an explicit, concrete reason in red_flags.
 - "disqualifier_hits": list of soft red flags detected in code (e.g. "region_locked_no_relocation"). Any hard disqualifier (clearance/citizenship/export control/required language the candidate lacks) has already been filtered out before you see the job — if you see a job here, it passed the hard filter, but treat a non-empty disqualifier_hits list as a strong negative.
-- "ghost_job_signals": list of legitimacy concerns detected in code (e.g. "staffing_agency_posting", "apply_off_platform", "commission_or_unpaid", "multiple_ongoing_openings", "vague_future_promise"). A non-empty list does NOT auto-reject the job, but you MUST treat each signal as a concrete red_flag and lower the score accordingly. If multiple signals fire, drop the score below 60 (excluded from output) — the posting is almost certainly not worth the candidate's time.
+- "ghost_job_signals": list of legitimacy concerns detected in code (e.g. "staffing_agency_posting", "apply_off_platform", "commission_or_unpaid", "multiple_ongoing_openings", "vague_future_promise"). A non-empty list does NOT auto-reject the job, but you MUST treat each signal as a concrete red_flag and lower the score accordingly. If multiple signals fire, score it below 60 — Python decides what the UI displays.
 
 Scoring factors (weight in order):
 - Stack match: anchor your stack judgement on "skill_overlap_score". A score >= 70 means strong stack coverage; 40-70 means partial; < 40 means the role uses a different stack and you should cap your final score accordingly.
@@ -34,7 +34,7 @@ Final score guidance:
 - A job with skill_overlap_score of 30 should rarely score above 50 overall, no matter how nice the company.
 - A job with skill_overlap_score of 80+ AND good location/seniority fit should land in the 85-95 band.
 
-Keep ONLY jobs scoring >= 60. Return them as a JSON array, highest score first.
+Return EXACTLY ONE entry for EVERY input job URL, including weak jobs scoring below 60. Never omit an input job. Python applies display thresholds after merging your results. Return the array highest score first.
 
 Output ONLY the raw JSON array — no markdown fences, no commentary, nothing before or after it — in this exact shape:
 
@@ -68,7 +68,7 @@ Field rules:
   - location_fit: candidate is in Bangladesh. Remote worldwide = high; BD-local = high; onsite abroad without relocation = very low.
   - compensation: if no salary is published, score 50 (neutral) and note "no salary published". If published, score higher for above-market, lower for clearly below-market, anchored on candidate's seniority.
   - culture_fit: domain alignment (e.g. the candidate's e-commerce / healthtech background vs the company's domain), tech-stack modernity, and remote-first signals from the description. Use 50 (neutral) when nothing in the description signals either way.
-- verdict: "apply" for strong matches worth a tailored application (score >= 80 with no red flags), "review" for plausible-but-imperfect (60-79, or >= 80 with soft red flags), "skip" for weak (only include a "skip" if it still scored >= 60 but the red_flags make it not worth applying).
+- verdict: "apply" for strong matches worth a tailored application (score >= 80 with no red flags), "review" for plausible-but-imperfect (60-79, or >= 80 with soft red flags), "skip" for weak jobs below 60 or jobs whose red flags make them not worth applying.
 - match_reasons: concrete, candidate-specific reasons — name the exact skills/technologies from the resume that map to the posting, and the seniority/domain alignment. Reference "skill_overlap_score" where it backs up the match.
 - red_flags: name concrete concerns — quote the disqualifier_hits, the location mismatch, the seniority gap, the stack mismatch, or quote ghost_job_signals by name when they fire. Vague concerns like "may not be a fit" are not allowed.
 - suggested_angle: one sentence on how the candidate should frame their application for this specific role, grounded in their resume.

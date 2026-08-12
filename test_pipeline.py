@@ -326,6 +326,44 @@ def test_analyze_jobs_survives_when_llm_omits_blocks(tmp_path, monkeypatch):
     assert merged[0]["score"] == 76
 
 
+def test_analyze_jobs_keeps_job_missing_from_ai_output(tmp_path, monkeypatch):
+    import finder
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "resume.md").write_text("# Resume")
+    jobs = [
+        {**_mock_raw_jobs()[0], "url": "https://x/returned"},
+        {**_mock_raw_jobs()[0], "url": "https://x/missing", "title": "Python Engineer"},
+    ]
+    profile = {"must_have_skills": ["python"], "nice_to_have_skills": [],
+               "seniority": "senior"}
+    model_out = [{
+        "url": "https://x/returned", "score": 80, "verdict": "apply",
+        "match_reasons": [], "red_flags": [], "suggested_angle": "",
+    }]
+    with patch.object(finder, "run_json", return_value=model_out):
+        merged = finder.analyze_jobs(jobs, profile=profile)
+    missing = next(j for j in merged if j["url"] == "https://x/missing")
+    assert missing["verdict"] == "review"
+    assert "analysis_missing" in missing["red_flags"]
+    assert missing["llm_score"] is None
+
+
+def test_analyze_jobs_empty_ai_output_preserves_previous_file(tmp_path, monkeypatch):
+    import finder
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "resume.md").write_text("# Resume")
+    (tmp_path / "output").mkdir()
+    previous = [{"url": "https://old", "score": 88}]
+    jobs_path = tmp_path / "output/jobs.json"
+    jobs_path.write_text(json.dumps(previous))
+    profile = {"must_have_skills": ["python"], "nice_to_have_skills": [],
+               "seniority": "senior"}
+    with patch.object(finder, "run_json", return_value=[]):
+        with pytest.raises(RuntimeError, match="returned no known jobs"):
+            finder.analyze_jobs(_mock_raw_jobs(), profile=profile)
+    assert json.loads(jobs_path.read_text()) == previous
+
+
 def test_discover_jobs_filters_and_caps(tmp_path, monkeypatch):
     import finder
     monkeypatch.chdir(tmp_path)

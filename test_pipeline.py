@@ -364,6 +364,24 @@ def test_analyze_jobs_empty_ai_output_preserves_previous_file(tmp_path, monkeypa
     assert json.loads(jobs_path.read_text()) == previous
 
 
+def test_analyze_jobs_caps_staffing_posting_at_review(tmp_path, monkeypatch):
+    import finder
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "resume.md").write_text("# Resume")
+    job = {**_mock_raw_jobs()[0], "company": "Quik Hire Staffing"}
+    profile = {"must_have_skills": ["python", "fastapi"],
+               "nice_to_have_skills": [], "seniority": "senior"}
+    model_out = [{
+        "url": job["url"], "score": 95, "verdict": "apply",
+        "match_reasons": [], "red_flags": [], "suggested_angle": "",
+    }]
+    with patch.object(finder, "run_json", return_value=model_out):
+        result = finder.analyze_jobs([job], profile=profile)[0]
+    assert result["score"] == 69
+    assert result["verdict"] == "review"
+    assert "staffing_agency_posting" in result["red_flags"]
+
+
 def test_discover_jobs_filters_and_caps(tmp_path, monkeypatch):
     import finder
     monkeypatch.chdir(tmp_path)

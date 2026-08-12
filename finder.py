@@ -421,6 +421,12 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
             max(0, min(100, int(round(
                 llm_score * 0.7 + skill * 0.3 + preference_adjustment
             ))))
+        ghost_signals = base.get("ghost_job_signals", [])
+        legitimacy_review = "staffing_agency_posting" in ghost_signals
+        if legitimacy_review:
+            final = min(final, 69)
+        red_flags = ["analysis_missing"] if analysis_missing else list(entry.get("red_flags", []))
+        red_flags.extend(signal for signal in ghost_signals if signal not in red_flags)
         merged.append({
             "title": entry.get("title") or base.get("title", ""),
             "company": entry.get("company") or base.get("company", ""),
@@ -447,7 +453,7 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
             "skill_overlap_score": skill,
             "llm_score": llm_score,
             "disqualifier_hits": base.get("disqualifier_hits", []),
-            "ghost_job_signals": base.get("ghost_job_signals", []),
+            "ghost_job_signals": ghost_signals,
             "preference_adjustment": preference_adjustment,
             "preference_reasons": base.get("preference_reasons", []),
             # Per-dimension breakdown (5-block structured eval). Defaults to
@@ -455,9 +461,9 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
             # single overall score when blocks are empty.
             "blocks": _normalize_blocks(entry.get("blocks")),
             "score": final,
-            "verdict": "review" if analysis_missing else entry.get("verdict", "review"),
+            "verdict": "review" if analysis_missing or legitimacy_review else entry.get("verdict", "review"),
             "match_reasons": entry.get("match_reasons", []),
-            "red_flags": ["analysis_missing"] if analysis_missing else entry.get("red_flags", []),
+            "red_flags": red_flags,
             "suggested_angle": entry.get("suggested_angle", ""),
         })
 
@@ -539,6 +545,8 @@ def run_pipeline(on_progress=None) -> dict:
             stage["eligible"] = stage.get("eligible", 0) + 1
             if "analysis_missing" not in job.get("red_flags", []):
                 stage["analyzed"] = stage.get("analyzed", 0) + 1
+            else:
+                stage["analysis_missing"] = stage.get("analysis_missing", 0) + 1
         if job.get("score", 0) >= THRESHOLD:
             stage["shortlisted"] = stage.get("shortlisted", 0) + 1
     report = {
@@ -548,7 +556,8 @@ def run_pipeline(on_progress=None) -> dict:
         },
         "totals": {
             key: sum(counts.get(key, 0) for counts in DISCOVERY_STAGES.values())
-            for key in ("fetched", "fresh", "role_relevant", "eligible", "analyzed", "shortlisted")
+            for key in ("fetched", "fresh", "role_relevant", "eligible", "analyzed",
+                        "analysis_missing", "shortlisted")
         },
     }
     (OUTPUT_DIR / "discovery_report.json").write_text(json.dumps(report, indent=2))

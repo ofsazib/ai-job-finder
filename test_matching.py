@@ -66,6 +66,24 @@ def test_role_relevance_rejects_manual_qa_by_default():
     assert not result["relevant"]
 
 
+def test_role_relevance_rejects_conflicting_primary_stack_title():
+    profile = {"target_roles": ["Senior Python Engineer", "Backend Engineer"],
+               "must_have_skills": ["python", "aws", "docker"]}
+    for title in ("Senior DevOps Engineer", "Node.js Developer (Python)",
+                  "Senior React Developer", "Kotlin Spring Engineer"):
+        assert not matching.role_relevance(
+            {"title": title, "description": "Python AWS Docker"}, profile
+        )["relevant"]
+
+
+def test_role_relevance_allows_explicitly_targeted_devops():
+    result = matching.role_relevance(
+        {"title": "Senior DevOps Engineer", "description": "AWS Kubernetes"},
+        {"target_roles": ["Senior DevOps Engineer"], "must_have_skills": ["aws"]},
+    )
+    assert result["relevant"]
+
+
 # ── skill_overlap_score ───────────────────────────────────
 def test_skill_overlap_full_match_must_have():
     job = {"title": "Backend Engineer", "tags": ["python", "django"],
@@ -448,6 +466,12 @@ def test_hard_reject_drops_french_required_for_english_only_candidate():
 def test_ghost_detects_staffing_agency():
     job = {"title": "Backend Engineer",
            "description": "Staffing agency seeking candidates for our client."}
+    assert "staffing_agency_posting" in matching.detect_ghost_job_signals(job)
+
+
+def test_ghost_detects_staffing_company_name():
+    job = {"title": "Software Engineer", "company": "Quik Hire Staffing",
+           "description": "Python role"}
     assert "staffing_agency_posting" in matching.detect_ghost_job_signals(job)
 
 

@@ -275,6 +275,12 @@ _NEGATIVE_ROLE_RE = re.compile(
 _ENGINEERING_TITLE_RE = re.compile(
     r"\b(engineer|developer|architect|tech(?:nical)?\s+lead)\b", re.I
 )
+_CONFLICTING_TITLE_FAMILIES = {
+    "devops": re.compile(r"\b(devops|site reliability|sre)\b", re.I),
+    "node": re.compile(r"\b(node(?:\.js)?|typescript)\b", re.I),
+    "frontend": re.compile(r"\b(front[\s-]?end|react|angular|vue)\b", re.I),
+    "jvm": re.compile(r"\b(kotlin|java|spring)\b", re.I),
+}
 
 
 def role_relevance(job: dict, profile: dict | None) -> dict:
@@ -286,6 +292,13 @@ def role_relevance(job: dict, profile: dict | None) -> dict:
     if negative and negative.group(1).lower() not in target:
         return {"relevant": False, "score": 0,
                 "reasons": [f"unrelated title: {negative.group(1).lower()}"]}
+    for family, pattern in _CONFLICTING_TITLE_FAMILIES.items():
+        if pattern.search(title) and not pattern.search(target):
+            return {"relevant": False, "score": 0,
+                    "reasons": [f"conflicting primary role: {family}"]}
+        if pattern.search(title) and pattern.search(target):
+            return {"relevant": True, "score": 85,
+                    "reasons": [f"target role family: {family}"]}
 
     for family, aliases in _ROLE_FAMILIES.items():
         if any(alias in title for alias in aliases) and any(alias in target for alias in aliases):
@@ -472,7 +485,7 @@ def is_language_eligible(
 # score reflects legitimacy concerns. Patterns inspired by career-ops Block G.
 _GHOST_SIGNALS = [
     ("staffing_agency_posting", re.compile(
-        r"\b(staffing\s+agency|recruiting\s+firm|talent\s+partner|talent\s+agency"
+        r"\b(staffing(?:\s+agency)?|recruiting\s+firm|talent\s+partner|talent\s+agency"
         r"|third[\s-]?party\s+recruiter|consulting\s+firm\s+seeking|c2c\s+requirements?)\b",
         re.I,
     )),
@@ -512,7 +525,7 @@ def detect_ghost_job_signals(job: dict) -> list[str]:
     Never hard-rejects on these alone — one false positive would cost a real
     opportunity. Instead the LLM sees them via ``analyze.md`` and weighs them.
     """
-    blob = f"{job.get('title', '')} {job.get('description', '')}"
+    blob = f"{job.get('title', '')} {job.get('company', '')} {job.get('description', '')}"
     return [name for name, pat in _GHOST_SIGNALS if pat.search(blob)]
 
 

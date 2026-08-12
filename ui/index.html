@@ -711,7 +711,7 @@
       const box = document.getElementById('discovery-report');
       const entries = Object.entries(report.sources ?? {});
       if (!entries.length) return box.classList.add('hidden');
-      const cols = ['fetched', 'fresh', 'role_relevant', 'eligible', 'analyzed', 'shortlisted'];
+      const cols = ['fetched', 'fresh', 'role_relevant', 'eligible', 'analyzed', 'analysis_missing', 'shortlisted'];
       box.innerHTML = `<h3 class="font-bold text-sm mb-3">Discovery funnel</h3><table class="w-full text-xs">
         <thead><tr class="text-slate-400"><th class="text-left py-1">Source</th>${cols.map(c => `<th class="text-right">${esc(c.replace('_', ' '))}</th>`).join('')}<th class="text-left pl-3">Status</th></tr></thead>
         <tbody>${entries.map(([name, row]) => `<tr class="border-t border-slate-100"><td class="py-1.5 font-medium">${esc(name)}</td>${cols.map(c => `<td class="text-right">${esc(row[c] ?? 0)}</td>`).join('')}<td class="pl-3 ${row.status === 'error' ? 'text-rose-600' : 'text-emerald-600'}">${esc(row.error || row.status || 'ok')}</td></tr>`).join('')}</tbody>

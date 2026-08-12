@@ -440,6 +440,7 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
             "is_repost": base.get("is_repost", False),
             "repost_count": base.get("repost_count", 1),
             "first_seen_at": base.get("first_seen_at", ""),
+            "description_incomplete": base.get("description_incomplete", False),
             "role_relevance_score": base.get("role_relevance_score", 0),
             "role_relevance_reasons": base.get("role_relevance_reasons", []),
             # Scoring: surface both signals + the blended final.

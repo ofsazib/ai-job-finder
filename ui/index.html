@@ -141,10 +141,12 @@
           class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[13px]
                  text-slate-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-200
                  focus:border-indigo-300 transition">
+          <option value="actionable" selected>Apply + review</option>
           <option value="all">All verdicts</option>
           <option value="apply">Apply</option>
           <option value="review">Review</option>
           <option value="skip">Skip</option>
+          <option value="hard-rejected">Hard rejected</option>
         </select>
         <select id="filter-mode" onchange="renderJobs()"
           class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[13px]
@@ -204,6 +206,8 @@
           </svg>
           <span id="summary-text"></span>
         </div>
+
+        <div id="discovery-report" class="hidden mb-5 bg-white border border-slate-200 rounded-xl p-4 overflow-x-auto"></div>
 
         <!-- Stats Cards -->
         <div id="stats-row" class="hidden mb-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -601,8 +605,9 @@
     /* ── jobs ────────────────────────────────────────────── */
     async function loadJobs() {
       try {
-        const res = await fetch('/api/jobs');
+        const [res, report] = await Promise.all([fetch('/api/jobs'), fetch('/api/discovery-report')]);
         allJobs = await res.json();
+        renderDiscoveryReport(await report.json());
         renderJobs();
       } catch (e) {
         console.error('Failed to load jobs', e);
@@ -616,7 +621,9 @@
       const sort = document.getElementById('sort-by').value;
 
       let jobs = allJobs.filter(j =>
-        (verdict === 'all' || j.verdict === verdict) &&
+        (verdict === 'all' || j.verdict === verdict ||
+         (verdict === 'actionable' && ['apply', 'review'].includes(j.verdict)) ||
+         (verdict === 'hard-rejected' && (j.red_flags ?? []).some(x => String(x).startsWith('hard-rejected:')))) &&
         (mode === 'all' || (j.work_mode ?? 'unknown') === mode) &&
         (locale === 'all' || (j.locale ?? 'unknown') === locale));
       if (sort === 'score-desc') jobs.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
@@ -656,6 +663,8 @@
             <div class="flex items-center gap-2 flex-wrap mb-1.5">
               ${verdictBadge(job.verdict)}
               ${job.source ? `<span class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">${esc(job.source)}</span>` : ''}
+              ${(job.red_flags ?? []).includes('analysis_missing') ? `<span class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Analysis incomplete</span>` : ''}
+              ${job.description_incomplete ? `<span class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Description incomplete</span>` : ''}
               ${fresh ? `<span class="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>${esc(fresh)}</span>` : ''}
             </div>
@@ -664,6 +673,7 @@
               <span class="font-medium text-slate-600">${esc(job.company ?? '')}</span>${job.location ? ' · ' + esc(job.location) : ''}
             </p>
             <div class="flex items-center gap-1.5 flex-wrap mt-2">${catBadges(job)}</div>
+            <p class="text-[11px] text-slate-400 mt-2">Skill ${esc(job.skill_overlap_score ?? 0)} · AI ${esc(job.llm_score ?? '—')} · Final ${esc(job.score ?? 0)}</p>
           </div>
         </div>
         ${blocksView(job.blocks)}
@@ -695,6 +705,18 @@
         </div>
       </div>`;
       }).join('');
+    }
+
+    function renderDiscoveryReport(report) {
+      const box = document.getElementById('discovery-report');
+      const entries = Object.entries(report.sources ?? {});
+      if (!entries.length) return box.classList.add('hidden');
+      const cols = ['fetched', 'fresh', 'role_relevant', 'eligible', 'analyzed', 'shortlisted'];
+      box.innerHTML = `<h3 class="font-bold text-sm mb-3">Discovery funnel</h3><table class="w-full text-xs">
+        <thead><tr class="text-slate-400"><th class="text-left py-1">Source</th>${cols.map(c => `<th class="text-right">${esc(c.replace('_', ' '))}</th>`).join('')}<th class="text-left pl-3">Status</th></tr></thead>
+        <tbody>${entries.map(([name, row]) => `<tr class="border-t border-slate-100"><td class="py-1.5 font-medium">${esc(name)}</td>${cols.map(c => `<td class="text-right">${esc(row[c] ?? 0)}</td>`).join('')}<td class="pl-3 ${row.status === 'error' ? 'text-rose-600' : 'text-emerald-600'}">${esc(row.error || row.status || 'ok')}</td></tr>`).join('')}</tbody>
+      </table>`;
+      box.classList.remove('hidden');
     }
 
     async function toggleStatus(url, current) {

@@ -28,6 +28,32 @@ def test_get_jobs_empty_when_no_file(client):
     assert res.json() == []
 
 
+def test_resume_status_and_invalid_upload(client):
+    assert client.get("/api/resume").json()["ready"] is False
+    response = client.post(
+        "/api/resume/upload", content=b"not a pdf", headers={"content-type": "application/pdf"}
+    )
+    assert response.status_code == 400
+
+
+def test_resume_upload_creates_local_files(client, tmp_path, monkeypatch):
+    import server
+
+    def generate(data, replace=False):
+        path = tmp_path / "resume.md"
+        path.write_text("# Jane Doe\n")
+        return path
+
+    monkeypatch.setattr(server, "generate_resume_md", generate)
+    pdf = b"%PDF-1.4 test"
+    response = client.post(
+        "/api/resume/upload", content=pdf, headers={"content-type": "application/pdf"}
+    )
+    assert response.status_code == 200
+    assert response.json()["ready"] is True
+    assert (tmp_path / "resume.pdf").read_bytes() == pdf
+
+
 def test_get_jobs_merges_status(client, tmp_path):
     jobs = [{"title": "Dev", "company": "Co", "url": "https://example.com",
              "score": 85, "verdict": "apply"}]

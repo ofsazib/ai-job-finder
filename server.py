@@ -5,10 +5,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from matching import DEFAULT_PREFERENCES
+from resume import MAX_PDF_BYTES, ROOT_PDFS, ResumeError, generate_resume_md
 
 app = FastAPI(title="AI Job Finder")
 
@@ -124,6 +125,28 @@ async def post_manual_job(body: ManualJob):
 @app.get("/")
 async def index():
     return FileResponse("ui/index.html")
+
+
+@app.get("/api/resume")
+async def get_resume():
+    pdf = next((name for name in ROOT_PDFS if Path(name).exists()), "")
+    return {"ready": Path("resume.md").exists() or bool(pdf), "pdf_available": pdf}
+
+
+@app.post("/api/resume/upload")
+async def upload_resume(request: Request, replace: bool = False):
+    if int(request.headers.get("content-length", "0") or 0) > MAX_PDF_BYTES:
+        raise HTTPException(status_code=413, detail="PDF must be no larger than 10 MB.")
+    data = await request.body()
+    try:
+        path = generate_resume_md(data, replace=replace)
+    except ResumeError as exc:
+        status = 409 if "already exists" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    temporary = Path("resume.pdf.tmp")
+    temporary.write_bytes(data)
+    temporary.replace("resume.pdf")
+    return {"ready": True, "path": path.name}
 
 
 @app.get("/api/discovery-report")

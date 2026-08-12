@@ -33,6 +33,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from resume import ResumeError, resolve_resume
+
 from dotenv import load_dotenv
 
 import sources
@@ -49,7 +51,6 @@ from matching import (
 load_dotenv()
 
 # ── config ────────────────────────────────────────────────
-RESUME_FILE = "resume.md"
 OUTPUT_DIR = Path("output")
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"  # ship with the code
 THRESHOLD = 70                       # score for the UI "above threshold" count
@@ -59,7 +60,7 @@ DISCOVERY_STAGES: dict[str, dict[str, int]] = {}
 
 
 def _resume_text() -> str:
-    return Path(RESUME_FILE).read_text(encoding="utf-8")
+    return resolve_resume().read_text(encoding="utf-8")
 
 
 def _selected_sources() -> list[str] | None:
@@ -514,8 +515,10 @@ def run_pipeline(on_progress=None) -> dict:
             on_progress(step, label, status)
 
     OUTPUT_DIR.mkdir(exist_ok=True)
-    if not Path(RESUME_FILE).exists():
-        raise RuntimeError(f"Missing {RESUME_FILE} — add your resume before running.")
+    try:
+        resolve_resume()
+    except ResumeError as exc:
+        raise RuntimeError(str(exc)) from exc
 
     print(f"Using AI backend: {active_backend()}")
 

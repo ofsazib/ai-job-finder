@@ -102,7 +102,10 @@ make setup
 
 Then:
 
-1. Put your resume in `resume.md` at the project root.
+1. Add your resume using any one of these options:
+   - Put `resume.md` at the project root.
+   - Put a text-based PDF named `resume.pdf` or `cv.pdf` at the project root. The first run creates `resume.md` automatically.
+   - Start the dashboard and upload a PDF when prompted.
 2. Open `.env` and set `AI_CLI` to the CLI you installed.
 3. Start the dashboard:
 
@@ -111,6 +114,8 @@ make run
 ```
 
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000), then click **Find Jobs**. The first run can take several minutes because it fetches public sources and asks the AI CLI to score matches.
+
+PDF text is cleaned into Markdown by the configured AI CLI without intentionally changing facts. If that cleanup fails, the extracted text is used directly. Scanned/image-only PDFs need OCR first.
 
 To run without the dashboard:
 

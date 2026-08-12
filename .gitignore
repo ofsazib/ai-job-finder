@@ -9,6 +9,8 @@ venv/
 # Secrets & personal data
 .env
 resume.md
+resume.pdf
+cv.pdf
 
 # Pipeline output (personal, regenerated each run)
 output/

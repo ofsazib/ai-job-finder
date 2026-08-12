@@ -64,16 +64,93 @@
 
     .thin-scroll::-webkit-scrollbar { width: 8px; }
     .thin-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+
+    .app-shell { display: flex; min-height: 100vh; }
+    .app-sidebar {
+      width: 17rem;
+      flex: 0 0 17rem;
+      overflow-y: auto;
+      box-shadow: 8px 0 30px -28px rgba(15, 23, 42, .45);
+    }
+    .sidebar-actions { display: grid; gap: .5rem; }
+    .sidebar-action {
+      min-height: 2.65rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: .5rem;
+    }
+    .dashboard-overview {
+      position: relative;
+      overflow: hidden;
+      padding: 1.5rem;
+      border: 1px solid rgba(199, 210, 254, .75);
+      border-radius: 1.25rem;
+      background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(238,242,255,.82));
+      box-shadow: 0 18px 50px -32px rgba(79, 70, 229, .45);
+    }
+    .dashboard-overview::after {
+      content: '';
+      position: absolute;
+      width: 12rem;
+      height: 12rem;
+      right: -6rem;
+      top: -7rem;
+      border-radius: 999px;
+      background: rgba(129, 140, 248, .12);
+      pointer-events: none;
+    }
+    .discovery-panel { background: rgba(255,255,255,.88); }
+    .discovery-panel > summary::-webkit-details-marker { display: none; }
+    .discovery-panel[open] .discovery-chevron { transform: rotate(180deg); }
+    .discovery-table-wrap { overflow-x: auto; padding: 0 1rem 1rem; }
+    .job-card-header { display: flex; align-items: flex-start; gap: 1rem; }
+    .job-card-actions { display: flex; gap: .5rem; margin-top: 1rem; flex-wrap: wrap; align-items: center; }
+    .modal-panel { max-height: calc(100vh - 2rem); overflow-y: auto; }
+
+    :focus-visible { outline: 3px solid rgba(99, 102, 241, .28); outline-offset: 2px; }
+
+    @media (max-width: 900px) {
+      .app-shell { display: block; }
+      .app-sidebar {
+        position: static !important;
+        width: 100%;
+        height: auto !important;
+        overflow-y: visible;
+        padding: 1rem;
+        border-right: 0;
+        border-bottom: 1px solid rgba(226, 232, 240, .9);
+      }
+      .sidebar-brand { margin-bottom: 1rem !important; }
+      .sidebar-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .sidebar-filters { margin-top: 1rem !important; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .sidebar-filters > p { grid-column: 1 / -1; }
+      .sidebar-footer { display: none; }
+      .page-content { padding: 1.5rem !important; }
+    }
+
+    @media (max-width: 640px) {
+      .sidebar-actions, .sidebar-filters { grid-template-columns: 1fr 1fr; }
+      .sidebar-action { padding-left: .65rem !important; padding-right: .65rem !important; }
+      .page-content { padding: 1rem !important; }
+      .dashboard-overview { padding: 1.1rem; }
+      .job-card { padding: 1rem 1rem 1rem 1.15rem !important; }
+      .job-card-header { gap: .75rem; }
+      .job-card-actions > * { flex: 1 1 auto; justify-content: center; text-align: center; }
+      .job-card-actions > :last-child { margin-left: 0 !important; }
+      .modal-panel { max-height: calc(100vh - 1rem); }
+      .modal-grid { grid-template-columns: 1fr !important; }
+    }
   </style>
 </head>
 
 <body class="text-slate-800 min-h-screen">
-  <div class="flex min-h-screen">
+  <div class="app-shell">
 
     <!-- ── Sidebar ─────────────────────────────────────────── -->
-    <aside class="w-72 shrink-0 bg-white/80 backdrop-blur border-r border-slate-200/80
+    <aside class="app-sidebar bg-white/85 backdrop-blur border-r border-slate-200/80
                   flex flex-col sticky top-0 h-screen px-5 py-6">
-      <div class="flex items-center gap-3 mb-8 px-1">
+      <div class="sidebar-brand flex items-center gap-3 mb-7 px-1">
         <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600
                     flex items-center justify-center text-white font-bold text-lg
                     shadow-lg shadow-indigo-500/30">J</div>
@@ -83,21 +160,22 @@
         </div>
       </div>
 
+      <div class="sidebar-actions">
       <button onclick="openPreferences()"
-        class="w-full mt-3 border border-slate-200 hover:bg-slate-50 text-slate-600 font-medium px-4 py-2 rounded-xl text-sm">
+        class="sidebar-action w-full border border-slate-200 hover:bg-slate-50 text-slate-600 font-medium px-4 py-2 rounded-xl text-sm transition">
         Preferences
       </button>
       <button onclick="document.getElementById('manual-modal').classList.remove('hidden')"
-        class="w-full mt-2 border border-slate-200 hover:bg-slate-50 text-slate-600 font-medium px-4 py-2 rounded-xl text-sm">
+        class="sidebar-action w-full border border-slate-200 hover:bg-slate-50 text-slate-600 font-medium px-4 py-2 rounded-xl text-sm transition">
         Analyze pasted job
       </button>
       <button onclick="openResumeUpload()"
-        class="w-full mt-2 border border-slate-200 hover:bg-slate-50 text-slate-600 font-medium px-4 py-2 rounded-xl text-sm">
+        class="sidebar-action w-full border border-slate-200 hover:bg-slate-50 text-slate-600 font-medium px-4 py-2 rounded-xl text-sm transition">
         Upload resume PDF
       </button>
 
       <button id="run-btn" onclick="runAgent()"
-        class="group w-full bg-gradient-to-br from-indigo-500 to-violet-600
+        class="sidebar-action group w-full bg-gradient-to-br from-indigo-500 to-violet-600
                hover:from-indigo-600 hover:to-violet-700 active:scale-[0.98]
                disabled:from-slate-300 disabled:to-slate-300 disabled:cursor-not-allowed
                text-white font-semibold px-4 py-2.5 rounded-xl transition-all text-sm
@@ -109,6 +187,7 @@
         </svg>
         <span id="run-btn-label">Find Jobs</span>
       </button>
+      </div>
 
       <!-- Connected vertical stepper -->
       <div id="progress-section" class="hidden mt-7">
@@ -139,7 +218,7 @@
       </div>
 
       <!-- Filters -->
-      <div class="mt-7 space-y-2.5">
+      <div class="sidebar-filters mt-7 space-y-2.5">
         <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-400 px-1">View</p>
         <select id="filter-verdict" onchange="renderJobs()"
           class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[13px]
@@ -180,17 +259,19 @@
         </select>
       </div>
 
-      <div class="mt-auto pt-4 border-t border-slate-200/70">
+      <div class="sidebar-footer mt-auto pt-4 border-t border-slate-200/70">
         <p id="last-run" class="text-[11px] text-slate-400 px-1"></p>
       </div>
     </aside>
 
     <!-- ── Main content ────────────────────────────────────── -->
     <main class="flex-1 min-w-0">
-      <div class="max-w-5xl mx-auto px-8 py-8">
+      <div class="page-content max-w-6xl mx-auto px-8 py-8">
+
+        <section class="dashboard-overview mb-5">
 
         <!-- Page header -->
-        <header class="flex items-end justify-between mb-6 gap-4 flex-wrap">
+        <header class="relative z-10 flex items-end justify-between mb-5 gap-4 flex-wrap">
           <div>
             <h2 class="text-2xl font-extrabold tracking-tight text-slate-900">Your matches</h2>
             <p class="text-sm text-slate-500 mt-1">Ranked by fit against your resume, freshest sources first.</p>
@@ -202,7 +283,7 @@
         </header>
 
         <!-- Summary Banner -->
-        <div id="summary-banner" class="hidden mb-5 fade-up bg-indigo-50 border border-indigo-200
+        <div id="summary-banner" class="hidden mb-4 fade-up bg-white/75 border border-indigo-200
            rounded-xl px-4 py-3 text-indigo-800 text-sm flex items-center gap-2.5">
           <svg class="w-4 h-4 shrink-0 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2"
                stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
@@ -211,10 +292,8 @@
           <span id="summary-text"></span>
         </div>
 
-        <div id="discovery-report" class="hidden mb-5 bg-white border border-slate-200 rounded-xl p-4 overflow-x-auto"></div>
-
         <!-- Stats Cards -->
-        <div id="stats-row" class="hidden mb-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div id="stats-row" class="hidden grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div class="bg-white border border-slate-200/80 rounded-xl p-3.5 shadow-sm">
             <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Total</p>
             <p id="stat-total" class="text-2xl font-bold text-slate-800 mt-0.5">0</p>
@@ -232,6 +311,18 @@
             <p id="stat-outcomes" class="text-2xl font-bold text-slate-800 mt-0.5">0</p>
           </div>
         </div>
+        </section>
+
+        <details id="discovery-report" class="discovery-panel hidden mb-5 border border-slate-200 rounded-2xl shadow-sm">
+          <summary class="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none">
+            <div>
+              <h3 class="font-bold text-sm text-slate-800">Discovery funnel</h3>
+              <p class="text-xs text-slate-400 mt-0.5">Source health and filtering details</p>
+            </div>
+            <span class="discovery-chevron text-slate-400 transition-transform">⌄</span>
+          </summary>
+          <div id="discovery-content" class="discovery-table-wrap"></div>
+        </details>
 
         <!-- Follow-up Queue -->
         <div id="followup-section" class="hidden mb-5">
@@ -266,7 +357,7 @@
 
   <!-- Preferences Modal -->
   <div id="preferences-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <form onsubmit="savePreferences(event)" class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+    <form onsubmit="savePreferences(event)" class="modal-panel bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
       <div class="flex justify-between items-center">
         <h3 class="font-bold text-slate-900">Job preferences</h3>
         <button type="button" aria-label="Close preferences" onclick="closePreferences()" class="text-xl text-slate-400">&times;</button>
@@ -283,7 +374,7 @@
       <label class="block text-xs font-semibold text-slate-600">Avoided terms
         <input id="pref-avoided" class="mt-1 w-full border rounded-lg px-3 py-2 font-normal" placeholder="unpaid, commission only">
       </label>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="modal-grid grid grid-cols-2 gap-3">
         <label class="text-xs font-semibold text-slate-600">Minimum salary
           <input id="pref-salary" type="number" min="0" class="mt-1 w-full border rounded-lg px-3 py-2 font-normal">
         </label>
@@ -299,9 +390,9 @@
 
   <!-- Manual Job Modal -->
   <div id="manual-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <form onsubmit="submitManualJob(event)" class="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-6 space-y-3">
+    <form onsubmit="submitManualJob(event)" class="modal-panel bg-white rounded-2xl shadow-2xl w-full max-w-xl p-6 space-y-3">
       <div class="flex justify-between"><h3 class="font-bold">Analyze pasted job</h3><button type="button" aria-label="Close" onclick="closeManualJob()">&times;</button></div>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="modal-grid grid grid-cols-2 gap-3">
         <input id="manual-title" class="border rounded-lg px-3 py-2" placeholder="Job title">
         <input id="manual-company" class="border rounded-lg px-3 py-2" placeholder="Company">
         <input id="manual-location" class="border rounded-lg px-3 py-2" placeholder="Location">
@@ -314,7 +405,7 @@
 
   <!-- Resume Modal -->
   <div id="resume-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+    <div class="modal-panel bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
       <h2 class="text-lg font-bold text-slate-900">Add your resume</h2>
       <p class="text-sm text-slate-500 mt-1">Upload a text-based PDF. It stays local and creates <code>resume.md</code>.</p>
       <input id="resume-file" type="file" accept="application/pdf,.pdf"
@@ -329,7 +420,7 @@
 
   <div id="cl-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm
      flex items-center justify-center z-50 p-4" onclick="if(event.target===this)closeCL()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[82vh] flex flex-col
+    <div class="modal-panel bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[82vh] flex flex-col
                 fade-up ring-1 ring-slate-200">
       <div class="flex justify-between items-center px-6 py-4 border-b border-slate-100 shrink-0">
         <div>
@@ -353,7 +444,7 @@
   <!-- Outcome Modal -->
   <div id="outcome-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm
      flex items-center justify-center z-50 p-4" onclick="if(event.target===this)closeOutcome()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md fade-up ring-1 ring-slate-200">
+    <div class="modal-panel bg-white rounded-2xl shadow-2xl w-full max-w-md fade-up ring-1 ring-slate-200">
       <div class="flex justify-between items-center px-6 py-4 border-b border-slate-100 shrink-0">
         <div>
           <h3 class="font-bold text-slate-900 leading-none">Record outcome</h3>
@@ -782,7 +873,7 @@
         return `
       <div class="job-card ${accentCls(job.verdict)} fade-up bg-white border border-slate-200/80
                   rounded-2xl shadow-sm p-5 pl-6 mb-3.5">
-        <div class="flex items-start gap-4">
+        <div class="job-card-header">
           ${scoreRing(job.score)}
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap mb-1.5">
@@ -809,7 +900,7 @@
             <p class="text-[11px] font-semibold uppercase tracking-wider text-indigo-400 mb-0.5">Suggested angle</p>
             <p class="text-[13px] text-slate-600 leading-relaxed">${esc(job.suggested_angle)}</p>
           </div>` : ''}
-        <div class="flex gap-2 mt-4 flex-wrap items-center">
+        <div class="job-card-actions">
           <a href="${esc(job.url ?? '#')}" target="_blank" rel="noopener noreferrer"
              class="text-[13px] font-medium bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5
                     rounded-lg transition shadow-sm shadow-indigo-600/20 inline-flex items-center gap-1.5">
@@ -840,10 +931,11 @@
 
     function renderDiscoveryReport(report) {
       const box = document.getElementById('discovery-report');
+      const content = document.getElementById('discovery-content');
       const entries = Object.entries(report.sources ?? {});
       if (!entries.length) return box.classList.add('hidden');
       const cols = ['fetched', 'fresh', 'role_relevant', 'eligible', 'analyzed', 'analysis_missing', 'shortlisted'];
-      box.innerHTML = `<h3 class="font-bold text-sm mb-3">Discovery funnel</h3><table class="w-full text-xs">
+      content.innerHTML = `<table class="w-full min-w-[720px] text-xs">
         <thead><tr class="text-slate-400"><th class="text-left py-1">Source</th>${cols.map(c => `<th class="text-right">${esc(c.replace('_', ' '))}</th>`).join('')}<th class="text-left pl-3">Status</th></tr></thead>
         <tbody>${entries.map(([name, row]) => `<tr class="border-t border-slate-100"><td class="py-1.5 font-medium">${esc(name)}</td>${cols.map(c => `<td class="text-right">${esc(row[c] ?? 0)}</td>`).join('')}<td class="pl-3 ${row.status === 'error' ? 'text-rose-600' : 'text-emerald-600'}">${esc(row.error || row.status || 'ok')}</td></tr>`).join('')}</tbody>
       </table>`;

@@ -1,4 +1,4 @@
-.PHONY: help setup run find test clean embedder-build embedder-up embedder-down embedder-logs embedder-health up down
+.PHONY: help setup run find test clean clean-docker clean-data clean-venv embedder-build embedder-up embedder-down embedder-logs embedder-health up down
 
 # Use uv if available, else fall back to the local venv's python.
 PYTHON := $(shell command -v uv >/dev/null 2>&1 && echo "uv run python" || echo ".venv/bin/python")
@@ -66,10 +66,36 @@ find: ## Run the pipeline headless (no web UI)
 test: ## Run the test suite
 	$(PYTHON) -m pytest -q
 
-clean: ## Remove generated output + Python caches (preserves embeddings cache)
-	rm -rf output/.pytest_cache
-	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+# Clean is destructive: wipes all generated data + the venv + docker state.
+# `.env`, `resume.md`, `resume.pdf`, `cv.*`, and `.git/` are preserved
+# (those are user-owned, not generated).
+clean: clean-docker clean-data clean-venv ## Wipe EVERYTHING: docker image + volume, output, embeddings cache, venv, pycache
+	@echo ""
+	@echo "✓ Project fully cleaned. Rebuild with:  make setup && make up"
 
-clean-all: ## Remove ALL output including embeddings + analysis cache
+clean-docker: ## Stop + remove the embedder container, image, and model volume
+	@if [ -n "$(COMPOSE)" ]; then \
+		echo "• Stopping + removing embedder container…"; \
+		$(COMPOSE) down --remove-orphans --volumes embedder 2>/dev/null || true; \
+		echo "• Removing docker image ai-job-finder-embedder…"; \
+		docker rmi ai-job-finder-embedder 2>/dev/null || true; \
+		echo "• Pruning dangling docker volumes (embedder-models)…"; \
+		docker volume rm ai-job-finder_embedder-models 2>/dev/null || true; \
+	else \
+		echo "• docker compose not found — skipping docker cleanup"; \
+	fi
+
+clean-data: ## Remove output dir (jobs, raw jobs, embeddings, analysis cache, cover letters) + Python caches
+	@echo "• Removing output/ (jobs, embeddings, analysis cache, cover letters)…"
 	rm -rf output
+	@echo "• Removing __pycache__ + .pytest_cache…"
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+	rm -rf .pytest_cache
+
+clean-venv: ## Remove the local virtualenv (forces full deps reinstall on next setup)
+	@if [ -d .venv ]; then \
+		echo "• Removing .venv/ ($(du -sh .venv 2>/dev/null | cut -f1))…"; \
+		rm -rf .venv; \
+	else \
+		echo "• .venv/ not present — skipping"; \
+	fi

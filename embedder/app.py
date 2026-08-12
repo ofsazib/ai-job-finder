@@ -23,9 +23,11 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-# Model is pinned: 384-dim cosine-friendly, ONNX-encoded, ~23MB on disk after
+# Model is pinned: 384-dim cosine-friendly, ONNX-encoded, ~90MB on disk after
 # first download. Same family used by Qdrant / Pinecone examples.
-MODEL_NAME = os.environ.get("EMBEDDER_MODEL", "Qdrant/MiniLM-L6-v2-v3")
+# Note: fastembed uses the sentence-transformers namespaced name, not the
+# Qdrant alias — the latter is not in the supported models list.
+MODEL_NAME = os.environ.get("EMBEDDER_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 # Where fastembed caches the ONNX weights. Mounted as a volume in compose
 # so we don't re-download across container restarts.
 CACHE_DIR = os.environ.get("EMBEDDER_CACHE_DIR", "/data/models")

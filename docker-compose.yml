@@ -19,7 +19,7 @@ services:
       # Persist downloaded ONNX weights across container restarts.
       - embedder-models:/data/models
     environment:
-      EMBEDDER_MODEL: Qdrant/MiniLM-L6-v2-v3
+      EMBEDDER_MODEL: sentence-transformers/all-MiniLM-L6-v2
       EMBEDDER_CACHE_DIR: /data/models
     restart: unless-stopped
     healthcheck:

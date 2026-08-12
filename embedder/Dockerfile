@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Comment out this line during dev to avoid slow rebuilds while iterating
 # on app.py; uncomment for production.
 RUN python -c "from fastembed import TextEmbedding; \
-    list(TextEmbedding(model_name='Qdrant/MiniLM-L6-v2-v3', cache_dir='/data/models').embed(['warmup']))"
+    list(TextEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2', cache_dir='/data/models').embed(['warmup']))"
 
 COPY app.py .
 

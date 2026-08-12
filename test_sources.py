@@ -257,3 +257,10 @@ def test_fetch_ashby_normalizes_public_board(monkeypatch):
     assert job["work_mode"] == "remote"
     assert job["employment_type"] == "full-time"
     assert "FastAPI" in job["description"]
+
+
+def test_configured_company_slugs_are_additive_and_deduped(monkeypatch):
+    monkeypatch.setenv("GREENHOUSE_COMPANIES", "acme, stripe, acme")
+    assert sources._configured_slugs(["stripe", "gitlab"], "GREENHOUSE_COMPANIES") == [
+        "stripe", "gitlab", "acme"
+    ]

@@ -58,6 +58,11 @@ DESCRIPTION_MAX = 1500
 SOURCE_DIAGNOSTICS: dict[str, dict] = {}
 
 
+def _configured_slugs(defaults: list[str], env_name: str) -> list[str]:
+    extra = [s.strip().lower() for s in os.environ.get(env_name, "").split(",") if s.strip()]
+    return list(dict.fromkeys([*defaults, *extra]))
+
+
 def job_fingerprint(job: dict) -> str:
     """Stable probable-role identity; URL remains the exact identity."""
     company = unicodedata.normalize("NFKD", job.get("company", "")).casefold()
@@ -778,6 +783,8 @@ GREENHOUSE_COMPANIES = [
     # Existing well-known boards
     "databricks", "airbnb", "gitlab", "cloudflare", "figma",
     "instacart", "dropbox", "reddit",
+    # Verified large public boards with distributed roles.
+    "canonical", "grafanalabs", "elastic",
 ]
 # Lever company slugs (the {slug} in jobs.lever.co/{slug}).
 # Verified live; many public slugs silently 404 (Document not found) when a
@@ -795,7 +802,7 @@ def fetch_greenhouse() -> list[dict]:
     https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true
     """
     jobs = []
-    for token in GREENHOUSE_COMPANIES:
+    for token in _configured_slugs(GREENHOUSE_COMPANIES, "GREENHOUSE_COMPANIES"):
         url = f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
         try:
             data = _get_json(url)
@@ -823,7 +830,7 @@ def fetch_lever() -> list[dict]:
     https://api.lever.co/v0/postings/{slug}?mode=json
     """
     jobs = []
-    for slug in LEVER_COMPANIES:
+    for slug in _configured_slugs(LEVER_COMPANIES, "LEVER_COMPANIES"):
         url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
         try:
             data = _get_json(url)
@@ -900,7 +907,7 @@ ASHBY_COMPANIES = ["openai", "notion", "linear", "supabase", "ramp"]
 
 def fetch_ashby() -> list[dict]:
     jobs: list[dict] = []
-    for board in ASHBY_COMPANIES:
+    for board in _configured_slugs(ASHBY_COMPANIES, "ASHBY_COMPANIES"):
         try:
             data = _get_json(f"https://api.ashbyhq.com/posting-api/job-board/{board}")
         except (OSError, ValueError) as e:
@@ -960,7 +967,7 @@ DEFAULT_SOURCES = [
     "remoteok", "remotive", "arbeitnow", "weworkremotely",
     "larajobs", "jobspresso", "vuejobs",
     "himalayas", "jobicy", "workingnomads",
-    "themuse", "greenhouse", "lever", "ashby", "linkedin",
+    "themuse", "greenhouse", "lever", "ashby", "linkedin", "hackernews",
 ]
 
 

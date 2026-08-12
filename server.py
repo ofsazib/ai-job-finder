@@ -6,12 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from matching import DEFAULT_PREFERENCES
 from resume import MAX_PDF_BYTES, ROOT_PDFS, ResumeError, generate_resume_md
-from finder import generate_cover_letter
+from finder import cover_letter_path, generate_cover_letter
 
 app = FastAPI(title="AI Job Finder")
 
@@ -353,6 +353,21 @@ async def post_cover_letter(body: CoverLetterRequest):
     finally:
         cover_letter_lock.release()
     return {"content": content, "cached": cached}
+
+
+@app.get("/api/cover-letter")
+async def get_cover_letter(url: str = Query(...)):
+    if not JOBS_FILE.exists():
+        raise HTTPException(status_code=404, detail="Job not found")
+    jobs = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
+    job = next((item for item in jobs if item.get("url") == url), None)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    path = cover_letter_path(job)
+    return {
+        "exists": path.exists(),
+        "content": path.read_text(encoding="utf-8") if path.exists() else "",
+    }
 
 
 @app.get("/api/run")

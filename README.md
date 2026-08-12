@@ -66,7 +66,7 @@ The host Python env stays tiny (~50 MB). The dockerized embedder (`embedder/`) l
 ## Quick start
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/ofsazib/ai-job-finder.git
 cd ai-job-finder
 make setup       # creates .venv, installs host deps, copies .env.example → .env
 ```
@@ -89,6 +89,10 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000), then click **Find Jobs**.
 
 The first run takes several minutes: feed fetch + cold-start LLM scoring. Subsequent runs reuse the analysis cache (jobs unchanged → near-zero LLM tokens).
 
+Cover letters are never generated during **Find Jobs**. Open a job's **Cover letter** dialog and select **Generate cover letter** when you want one. The result is stored in `output/cover_letters/`; later opens reuse it immediately, and **Regenerate** explicitly replaces it.
+
+After pulling new code, restart the dashboard so backend and frontend changes load: press `Ctrl+C`, run `make up` again, then refresh the browser.
+
 PDF text is cleaned into Markdown by the configured AI CLI without intentionally changing facts. If that cleanup fails, the extracted text is used directly. Scanned/image-only PDFs need OCR first.
 
 ### Other make targets
@@ -96,7 +100,7 @@ PDF text is cleaned into Markdown by the configured AI CLI without intentionally
 | Command | Action |
 |---|---|
 | `make up` | Build sidecar + start dashboard (recommended) |
-| `make down` | Stop the embedder sidecar (host server exits with Ctrl-C) |
+| `make down` | Stop the embedder sidecar after stopping the dashboard with `Ctrl+C` |
 | `make run` | Start dashboard only (assumes sidecar up or accepts fallback) |
 | `make find` | Run pipeline headless (no dashboard) |
 | `make embedder-build` | Build the docker image |
@@ -104,9 +108,8 @@ PDF text is cleaned into Markdown by the configured AI CLI without intentionally
 | `make embedder-down` | Stop sidecar (model volume preserved) |
 | `make embedder-logs` | Tail sidecar logs (model load progress, errors) |
 | `make embedder-health` | `curl /health` on the sidecar |
-| `make test` | Run the test suite (139 tests) |
-| `make clean` | Remove generated output + Python caches (preserves embeddings cache) |
-| `make clean-all` | Nuclear: remove ALL output including embeddings + analysis cache |
+| `make test` | Run the complete test suite |
+| `make clean` | Remove Docker state, generated output/caches, and `.venv`; preserve resume and `.env` |
 
 ### Fallback (no docker)
 
@@ -240,7 +243,7 @@ All optional, via `.env` or environment:
 ## Tests
 
 ```bash
-make test        # 139 tests
+make test
 ```
 
 ## Project structure

@@ -16,7 +16,7 @@ setup: ## Install Python deps + create .env from template
 	@command -v uv >/dev/null 2>&1 && uv venv && uv pip install -r requirements.txt \
 		|| (python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)
 	@test -f .env || cp .env.example .env
-	@echo "Setup done. Add your resume.md, then 'make up'."
+	@echo "Setup done. Add resume.md/resume.pdf/cv.pdf, then 'make up'."
 
 up: embedder-up ## Start the whole stack (embedder sidecar + web dashboard)
 	@echo "Starting dashboard at http://127.0.0.1:8000 …"

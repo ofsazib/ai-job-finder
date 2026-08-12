@@ -644,12 +644,15 @@ def _slug(text: str, max_len: int = 40) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")[:max_len]
 
 
-def generate_cover_letter(job: dict, regenerate: bool = False) -> tuple[str, bool]:
-    out_dir = OUTPUT_DIR / "cover_letters"
-    out_dir.mkdir(parents=True, exist_ok=True)
+def cover_letter_path(job: dict) -> Path:
     company = job.get("company") or "unknown"
     title = job.get("title") or "role"
-    out_path = out_dir / f"{_slug(company)}__{_slug(title)}.md"
+    return OUTPUT_DIR / "cover_letters" / f"{_slug(company)}__{_slug(title)}.md"
+
+
+def generate_cover_letter(job: dict, regenerate: bool = False) -> tuple[str, bool]:
+    out_path = cover_letter_path(job)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     if out_path.exists() and not regenerate:
         return out_path.read_text(encoding="utf-8"), True
 

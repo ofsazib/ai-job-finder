@@ -97,6 +97,28 @@ def test_cover_letter_rejects_unknown_job(client):
     assert r.status_code == 404
 
 
+def test_cover_letter_status_reports_missing_without_generating(client, tmp_path):
+    jobs = [{"url": "https://acme.example/job", "company": "Acme", "title": "Backend Engineer"}]
+    (tmp_path / "output" / "jobs.json").write_text(json.dumps(jobs))
+
+    r = client.get("/api/cover-letter", params={"url": jobs[0]["url"]})
+    assert r.status_code == 200
+    assert r.json() == {"exists": False, "content": ""}
+
+
+def test_cover_letter_status_returns_stored_letter(client, tmp_path):
+    from finder import _slug
+    job = {"url": "https://acme.example/job", "company": "Acme", "title": "Backend Engineer"}
+    (tmp_path / "output" / "jobs.json").write_text(json.dumps([job]))
+    directory = tmp_path / "output" / "cover_letters"
+    directory.mkdir()
+    path = directory / f"{_slug(job['company'])}__{_slug(job['title'])}.md"
+    path.write_text("Stored letter")
+
+    r = client.get("/api/cover-letter", params={"url": job["url"]})
+    assert r.json() == {"exists": True, "content": "Stored letter"}
+
+
 def test_cover_letter_generates_known_job_on_demand(client, tmp_path, monkeypatch):
     import server
     jobs = [{"url": "https://acme.example/job", "company": "Acme", "title": "Backend Engineer"}]

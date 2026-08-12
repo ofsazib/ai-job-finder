@@ -424,8 +424,11 @@
         </div>
         <div class="flex items-center gap-1">
           <button id="cl-copy" onclick="copyCL()"
-            class="text-xs font-medium text-slate-500 hover:text-indigo-600 hover:bg-indigo-50
+            class="hidden text-xs font-medium text-slate-500 hover:text-indigo-600 hover:bg-indigo-50
                    px-3 py-1.5 rounded-lg transition">Copy</button>
+          <button id="cl-generate" onclick="requestCoverLetter(false)"
+            class="hidden text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700
+                   px-3 py-1.5 rounded-lg transition">Generate cover letter</button>
           <button id="cl-regenerate" onclick="requestCoverLetter(true)"
             class="hidden text-xs font-medium text-slate-500 hover:text-indigo-600 hover:bg-indigo-50
                    px-3 py-1.5 rounded-lg transition">Regenerate</button>
@@ -1020,25 +1023,54 @@
     /* ── cover letter modal ──────────────────────────────── */
     let activeCoverLetter = null;
 
-    function openCL(button) {
+    async function openCL(button) {
       const {url, company, title} = button.dataset;
       const modal = document.getElementById('cl-modal');
       activeCoverLetter = {button, url, company, title};
       document.getElementById('cl-subtitle').textContent =
         [title, company].filter(Boolean).join(' · ');
+      const content = document.getElementById('cl-content');
+      const generateButton = document.getElementById('cl-generate');
+      const regenerateButton = document.getElementById('cl-regenerate');
+      const copyButton = document.getElementById('cl-copy');
+      content.textContent = 'Checking for a stored cover letter…';
+      generateButton.textContent = 'Generate cover letter';
+      generateButton.classList.add('hidden');
+      regenerateButton.classList.add('hidden');
+      copyButton.classList.add('hidden');
       modal.classList.remove('hidden');
-      requestCoverLetter(false);
+      try {
+        const res = await fetch(`/api/cover-letter?url=${encodeURIComponent(url)}`, {method: 'GET'});
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.detail || 'Lookup failed.');
+        if (result.exists) {
+          content.textContent = result.content;
+          regenerateButton.classList.remove('hidden');
+          copyButton.classList.remove('hidden');
+        } else {
+          content.textContent = 'No cover letter generated yet.';
+          generateButton.classList.remove('hidden');
+        }
+      } catch {
+        content.textContent = 'Failed to check for a stored cover letter.';
+        generateButton.textContent = 'Retry';
+        generateButton.classList.remove('hidden');
+      }
     }
 
     async function requestCoverLetter(regenerate) {
       if (!activeCoverLetter) return;
       const {button, url} = activeCoverLetter;
       const content = document.getElementById('cl-content');
+      const generateButton = document.getElementById('cl-generate');
       const regenerateButton = document.getElementById('cl-regenerate');
+      const copyButton = document.getElementById('cl-copy');
       const previousLabel = button.textContent;
       button.disabled = true;
       button.textContent = 'Generating…';
+      generateButton.classList.add('hidden');
       regenerateButton.classList.add('hidden');
+      copyButton.classList.add('hidden');
       content.innerHTML = '<span class="spinning">↻</span> Generating cover letter…';
       try {
         const res = await fetch('/api/cover-letter', {
@@ -1049,12 +1081,13 @@
         const result = await res.json();
         if (!res.ok) throw new Error(result.detail || 'Generation failed.');
         content.textContent = result.content;
+        copyButton.classList.remove('hidden');
         regenerateButton.textContent = 'Regenerate';
         regenerateButton.classList.remove('hidden');
       } catch {
         content.textContent = 'Failed to generate the cover letter. Select Retry to try again.';
-        regenerateButton.textContent = 'Retry';
-        regenerateButton.classList.remove('hidden');
+        generateButton.textContent = 'Retry';
+        generateButton.classList.remove('hidden');
       } finally {
         button.disabled = false;
         button.textContent = previousLabel;

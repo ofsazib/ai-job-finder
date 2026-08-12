@@ -28,6 +28,44 @@ def test_evaluate_preferences_defaults_are_neutral():
     }
 
 
+def test_role_relevance_accepts_target_backend_titles():
+    profile = {"target_roles": ["Senior Backend Engineer", "Senior Python Engineer"],
+               "must_have_skills": ["python", "django"]}
+    result = matching.role_relevance(
+        {"title": "Lead Backend Engineer", "description": "Go services"}, profile
+    )
+    assert result["relevant"] and result["score"] >= 80
+
+
+def test_role_relevance_rejects_unrelated_title_with_generic_keyword():
+    profile = {"target_roles": ["Backend Engineer"], "must_have_skills": ["aws"]}
+    result = matching.role_relevance(
+        {"title": "Procurement Analyst", "description": "Manage AWS purchasing"}, profile
+    )
+    assert not result["relevant"]
+
+
+def test_role_relevance_generic_engineer_needs_two_skills():
+    profile = {"target_roles": ["Backend Engineer"],
+               "must_have_skills": ["python", "postgresql", "redis"]}
+    weak = matching.role_relevance(
+        {"title": "Software Engineer", "description": "Uses Python"}, profile
+    )
+    strong = matching.role_relevance(
+        {"title": "Software Engineer", "description": "Python and PostgreSQL"}, profile
+    )
+    assert not weak["relevant"]
+    assert strong["relevant"]
+
+
+def test_role_relevance_rejects_manual_qa_by_default():
+    result = matching.role_relevance(
+        {"title": "Manual QA Engineer", "description": "Python test scripts"},
+        {"target_roles": ["Python Engineer"], "must_have_skills": ["python"]},
+    )
+    assert not result["relevant"]
+
+
 # ── skill_overlap_score ───────────────────────────────────
 def test_skill_overlap_full_match_must_have():
     job = {"title": "Backend Engineer", "tags": ["python", "django"],

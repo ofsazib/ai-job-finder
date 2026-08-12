@@ -258,6 +258,59 @@ def _whole_token(haystack: str, skill: str) -> bool:
     return bool(pat.search(haystack))
 
 
+_ROLE_FAMILIES = {
+    "backend": ("backend", "back-end"),
+    "python": ("python",),
+    "platform": ("platform", "infrastructure"),
+    "full-stack": ("full-stack", "full stack", "fullstack"),
+    "architect": ("architect",),
+    "leadership": ("tech lead", "technical lead", "engineering lead"),
+    "data": ("data engineer", "data platform"),
+}
+_NEGATIVE_ROLE_RE = re.compile(
+    r"\b(procurement|sales|customer\s+(?:success|support)|graphic\s+design"
+    r"|product\s+design|manual\s+qa|quality\s+assurance|recruiter|marketing)\b",
+    re.I,
+)
+_ENGINEERING_TITLE_RE = re.compile(
+    r"\b(engineer|developer|architect|tech(?:nical)?\s+lead)\b", re.I
+)
+
+
+def role_relevance(job: dict, profile: dict | None) -> dict:
+    """Cheap title-first gate that broad description keywords cannot bypass."""
+    profile = profile or {}
+    title = (job.get("title") or "").lower()
+    target = " ".join(profile.get("target_roles") or []).lower()
+    negative = _NEGATIVE_ROLE_RE.search(title)
+    if negative and negative.group(1).lower() not in target:
+        return {"relevant": False, "score": 0,
+                "reasons": [f"unrelated title: {negative.group(1).lower()}"]}
+
+    for family, aliases in _ROLE_FAMILIES.items():
+        if any(alias in title for alias in aliases) and any(alias in target for alias in aliases):
+            return {"relevant": True, "score": 85,
+                    "reasons": [f"target role family: {family}"]}
+
+    skills = [
+        s for s in [*(profile.get("must_have_skills") or []),
+                    *(profile.get("nice_to_have_skills") or []),
+                    *(profile.get("keywords") or [])]
+        if s and s not in {"backend", "system design", "distributed systems"}
+    ]
+    haystack = _norm_text([
+        job.get("title", ""), " ".join(job.get("tags", []) or []),
+        job.get("description", ""),
+    ])
+    hits = list(dict.fromkeys(s.lower() for s in skills if _whole_token(haystack, s)))
+    relevant = bool(_ENGINEERING_TITLE_RE.search(title)) and len(hits) >= 2
+    return {
+        "relevant": relevant,
+        "score": min(79, 35 + len(hits) * 12) if relevant else 0,
+        "reasons": [f"skill evidence: {', '.join(hits[:5])}"] if hits else [],
+    }
+
+
 # ── skill overlap score ───────────────────────────────────
 def skill_overlap_score(
     job: dict,

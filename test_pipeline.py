@@ -378,9 +378,10 @@ def test_discover_jobs_filters_and_caps(tmp_path, monkeypatch):
         for i in range(5)
     ]
     with patch.object(finder.sources, "fetch_all", return_value=raw), \
-         patch.object(finder.sources, "filter_recent", side_effect=lambda j, **k: j), \
-         patch.object(finder.sources, "filter_keywords", side_effect=lambda j, k: j):
-        out = finder.discover_jobs({"keywords": ["python"]})
+         patch.object(finder.sources, "filter_recent", side_effect=lambda j, **k: j):
+        out = finder.discover_jobs({
+            "target_roles": ["Python Engineer"], "keywords": ["python"]
+        })
 
     assert len(out) == 2                               # capped
     assert out[0]["posted_epoch"] >= out[1]["posted_epoch"]  # freshest first

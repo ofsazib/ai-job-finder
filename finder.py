@@ -42,6 +42,7 @@ from matching import (
     disqualifier_hits,
     evaluate_preferences,
     hard_reject,
+    role_relevance,
     skill_overlap_score,
 )
 
@@ -129,9 +130,14 @@ def discover_jobs(profile: dict) -> list[dict]:
     fresh = sources.filter_recent(raw, max_age_days=MAX_DAYS)
     print(f"  {len(fresh)} within the last {MAX_DAYS} days")
 
-    keywords = profile.get("keywords") or []
-    matched = sources.filter_keywords(fresh, keywords)
-    print(f"  {len(matched)} match the candidate's keywords")
+    matched = []
+    for job in fresh:
+        relevance = role_relevance(job, profile)
+        job["role_relevance_score"] = relevance["score"]
+        job["role_relevance_reasons"] = relevance["reasons"]
+        if relevance["relevant"]:
+            matched.append(job)
+    print(f"  {len(matched)} match the candidate's target roles")
 
     # Interleave sources round-robin (freshest first within each) before
     # capping, so one feed's same-day flood can't crowd every other source out
@@ -425,6 +431,8 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
             "is_repost": base.get("is_repost", False),
             "repost_count": base.get("repost_count", 1),
             "first_seen_at": base.get("first_seen_at", ""),
+            "role_relevance_score": base.get("role_relevance_score", 0),
+            "role_relevance_reasons": base.get("role_relevance_reasons", []),
             # Scoring: surface both signals + the blended final.
             "skill_overlap_score": skill,
             "llm_score": llm_score,

@@ -43,6 +43,7 @@ import html
 import hashlib
 import json
 import re
+import time
 import unicodedata
 import urllib.request
 from datetime import datetime, timezone
@@ -52,6 +53,7 @@ from xml.etree import ElementTree
 USER_AGENT = "ai-job-finder/1.0 (+https://github.com/ofsazib)"
 FETCH_TIMEOUT = 30
 DESCRIPTION_MAX = 1500
+SOURCE_DIAGNOSTICS: dict[str, dict] = {}
 
 
 def job_fingerprint(job: dict) -> str:
@@ -886,17 +888,27 @@ def fetch_all(source_names: list[str] | None = None) -> list[dict]:
     aborting the run.
     """
     names = source_names or DEFAULT_SOURCES
+    SOURCE_DIAGNOSTICS.clear()
     jobs: list[dict] = []
     seen: set[str] = set()
     for name in names:
+        started = time.monotonic()
         fetcher = ALL_SOURCES.get(name)
         if not fetcher:
             print(f"  [sources] unknown source '{name}' — skipping")
+            SOURCE_DIAGNOSTICS[name] = {
+                "status": "error", "fetched": 0, "error": "unknown source",
+                "duration_ms": 0,
+            }
             continue
         try:
             fetched = fetcher()
         except Exception as e:  # noqa: BLE001 — never let one feed sink the run
             print(f"  [sources] {name} failed: {e}")
+            SOURCE_DIAGNOSTICS[name] = {
+                "status": "error", "fetched": 0, "error": str(e)[:300],
+                "duration_ms": int((time.monotonic() - started) * 1000),
+            }
             continue
         added = 0
         for job in fetched:
@@ -907,6 +919,10 @@ def fetch_all(source_names: list[str] | None = None) -> list[dict]:
             jobs.append(job)
             added += 1
         print(f"  [sources] {name}: {added} job(s)")
+        SOURCE_DIAGNOSTICS[name] = {
+            "status": "ok", "fetched": added, "error": "",
+            "duration_ms": int((time.monotonic() - started) * 1000),
+        }
     return jobs
 
 

@@ -1,6 +1,20 @@
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 import sources
+
+
+def test_fetch_all_records_source_diagnostics():
+    job = {"url": "https://x/1"}
+    with patch.dict(sources.ALL_SOURCES, {
+        "good": lambda: [job],
+        "bad": lambda: (_ for _ in ()).throw(OSError("blocked")),
+    }, clear=True):
+        assert sources.fetch_all(["good", "bad"]) == [job]
+    assert sources.SOURCE_DIAGNOSTICS["good"]["status"] == "ok"
+    assert sources.SOURCE_DIAGNOSTICS["good"]["fetched"] == 1
+    assert sources.SOURCE_DIAGNOSTICS["bad"]["status"] == "error"
+    assert "blocked" in sources.SOURCE_DIAGNOSTICS["bad"]["error"]
 
 
 def test_job_fingerprint_normalizes_title_and_company():

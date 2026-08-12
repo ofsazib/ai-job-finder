@@ -55,6 +55,7 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"  # ship with the code
 THRESHOLD = 70                       # score for the UI "above threshold" count
 MAX_DAYS = int(os.environ.get("MAX_JOB_AGE_DAYS", "30"))
 MAX_JOBS_TO_ANALYZE = int(os.environ.get("MAX_JOBS_TO_ANALYZE", "40"))
+DISCOVERY_STAGES: dict[str, dict[str, int]] = {}
 
 
 def _resume_text() -> str:
@@ -125,9 +126,15 @@ def build_search_profile() -> dict:
 def discover_jobs(profile: dict) -> list[dict]:
     """Fetch feed jobs, enforce the freshness cutoff, keyword-prefilter."""
     raw = sources.fetch_all(_selected_sources())
+    DISCOVERY_STAGES.clear()
+    for source, diagnostic in sources.SOURCE_DIAGNOSTICS.items():
+        DISCOVERY_STAGES[source] = {"fetched": diagnostic.get("fetched", 0)}
     print(f"  Fetched {len(raw)} postings from feeds")
 
     fresh = sources.filter_recent(raw, max_age_days=MAX_DAYS)
+    for job in fresh:
+        DISCOVERY_STAGES.setdefault(job.get("source", "unknown"), {}).setdefault("fresh", 0)
+        DISCOVERY_STAGES[job.get("source", "unknown")]["fresh"] += 1
     print(f"  {len(fresh)} within the last {MAX_DAYS} days")
 
     matched = []
@@ -137,6 +144,8 @@ def discover_jobs(profile: dict) -> list[dict]:
         job["role_relevance_reasons"] = relevance["reasons"]
         if relevance["relevant"]:
             matched.append(job)
+            stage = DISCOVERY_STAGES.setdefault(job.get("source", "unknown"), {})
+            stage["role_relevant"] = stage.get("role_relevant", 0) + 1
     print(f"  {len(matched)} match the candidate's target roles")
 
     # Interleave sources round-robin (freshest first within each) before
@@ -519,6 +528,29 @@ def run_pipeline(on_progress=None) -> dict:
 
     emit(3, "Analyzing & scoring", "running")
     all_jobs = analyze_jobs(jobs, profile=profile)
+    for job in all_jobs:
+        source = job.get("source", "unknown")
+        stage = DISCOVERY_STAGES.setdefault(source, {})
+        hard_rejected = any(
+            str(flag).startswith("hard-rejected:") for flag in job.get("red_flags", [])
+        )
+        if not hard_rejected:
+            stage["eligible"] = stage.get("eligible", 0) + 1
+            if "analysis_missing" not in job.get("red_flags", []):
+                stage["analyzed"] = stage.get("analyzed", 0) + 1
+        if job.get("score", 0) >= THRESHOLD:
+            stage["shortlisted"] = stage.get("shortlisted", 0) + 1
+    report = {
+        "sources": {
+            name: {**sources.SOURCE_DIAGNOSTICS.get(name, {}), **counts}
+            for name, counts in DISCOVERY_STAGES.items()
+        },
+        "totals": {
+            key: sum(counts.get(key, 0) for counts in DISCOVERY_STAGES.values())
+            for key in ("fetched", "fresh", "role_relevant", "eligible", "analyzed", "shortlisted")
+        },
+    }
+    (OUTPUT_DIR / "discovery_report.json").write_text(json.dumps(report, indent=2))
     emit(3, "Analyzing & scoring", "done")
 
     emit(4, "Generating cover letters", "running")

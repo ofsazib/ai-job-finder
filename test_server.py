@@ -103,3 +103,10 @@ def test_preferences_default_and_round_trip(client):
 
 def test_manual_job_rejects_empty_description(client):
     assert client.post("/api/jobs/manual", json={"description": " "}).status_code == 422
+
+
+def test_discovery_report_empty_then_loaded(client, tmp_path):
+    assert client.get("/api/discovery-report").json() == {"sources": {}, "totals": {}}
+    report = {"sources": {"remoteok": {"fetched": 3}}, "totals": {"fetched": 3}}
+    (tmp_path / "output/discovery_report.json").write_text(json.dumps(report))
+    assert client.get("/api/discovery-report").json() == report

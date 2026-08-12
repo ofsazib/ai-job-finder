@@ -16,6 +16,7 @@ STATUS_FILE = Path("output/status.json")
 JOBS_FILE = Path("output/jobs.json")
 COVER_LETTERS_DIR = Path("output/cover_letters")
 PREFERENCES_FILE = Path("output/preferences.json")
+DISCOVERY_REPORT_FILE = Path("output/discovery_report.json")
 
 run_lock = threading.Lock()
 
@@ -123,6 +124,13 @@ async def post_manual_job(body: ManualJob):
 @app.get("/")
 async def index():
     return FileResponse("ui/index.html")
+
+
+@app.get("/api/discovery-report")
+async def get_discovery_report():
+    if not DISCOVERY_REPORT_FILE.exists():
+        return {"sources": {}, "totals": {}}
+    return json.loads(DISCOVERY_REPORT_FILE.read_text(encoding="utf-8"))
 
 
 @app.get("/api/jobs")

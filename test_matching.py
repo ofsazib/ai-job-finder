@@ -72,7 +72,7 @@ def test_skill_overlap_full_match_must_have():
            "description": "Build APIs with FastAPI and Postgres"}
     must = ["python", "django", "fastapi", "postgres"]
     score = matching.skill_overlap_score(job, must, [])
-    # All 4 must-haves hit → 4/4 * 70 = 70 + baseline 10 = 80
+    # Language + web framework + relational data evidence.
     assert score == 80
 
 
@@ -81,8 +81,7 @@ def test_skill_overlap_partial_match():
            "description": "Build APIs"}
     must = ["python", "django", "fastapi", "postgres"]
     score = matching.skill_overlap_score(job, must, [])
-    # 1/4 * 70 = 17.5 → 17, + baseline 10 = 27
-    assert score == 27
+    assert score == 30
 
 
 def test_skill_overlap_zero_match():
@@ -97,10 +96,10 @@ def test_skill_overlap_zero_match():
 def test_skill_overlap_with_nice_to_have():
     job = {"title": "Backend Engineer", "tags": ["python", "django", "go"],
            "description": "Postgres"}
-    must = ["python", "django"]          # both hit → 2/2*70 = 70
-    nice = ["go", "kubernetes", "graphql"]  # go hits → 1/3*20 ≈ 6.67 → 6
+    must = ["python", "django"]
+    nice = ["go", "kubernetes", "graphql"]
     score = matching.skill_overlap_score(job, must, nice)
-    assert score == 70 + 6 + 10  # = 86
+    assert score == 55  # language + web; unconfigured Postgres is neutral
 
 
 def test_skill_overlap_whole_token_not_substring():
@@ -109,6 +108,35 @@ def test_skill_overlap_whole_token_not_substring():
            "description": "Lead the team to achieve goals. Based in Portugal."}
     score = matching.skill_overlap_score(job, ["go"], [])
     assert score == 0
+
+
+def test_skill_family_python_web_and_database_is_strong():
+    job = {"title": "Backend Engineer", "tags": ["python", "django"],
+           "description": "PostgreSQL APIs on AWS"}
+    score = matching.skill_overlap_score(
+        job, ["python", "fastapi", "postgresql", "redis", "aws", "docker"], []
+    )
+    assert score >= 75
+
+
+def test_skill_family_fastapi_matches_python_web_profile():
+    job = {"title": "Python Engineer", "tags": [],
+           "description": "FastAPI services with SQL and Docker"}
+    score = matching.skill_overlap_score(
+        job, ["python", "django", "postgresql", "aws", "docker"], []
+    )
+    assert score >= 70
+
+
+def test_skill_family_cloud_provider_is_adjacent():
+    job = {"title": "Platform Engineer", "tags": [],
+           "description": "Python services deployed to GCP with Kubernetes"}
+    assert matching.skill_overlap_score(job, ["python", "aws", "docker"], []) >= 70
+
+
+def test_skill_family_lone_generic_cloud_mention_is_weak():
+    job = {"title": "Customer Architect", "tags": [], "description": "AWS"}
+    assert matching.skill_overlap_score(job, ["python", "django", "aws"], []) < 50
 
 
 def test_skill_overlap_no_skills_returns_neutral():
@@ -123,8 +151,7 @@ def test_skill_overlap_caps_at_100():
     nice = ["a", "b", "c", "d", "e", "f"]  # 6 nice, none hit
     score = matching.skill_overlap_score(job, must, nice)
     assert score <= 100
-    # python hits: 1/1*70 + 0*20 + 10 = 80
-    assert score == 80
+    assert score == 30  # one language family cannot look like a full-stack match
 
 
 # ── disqualifier_hits ─────────────────────────────────────

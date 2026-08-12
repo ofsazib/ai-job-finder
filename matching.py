@@ -317,36 +317,43 @@ def skill_overlap_score(
     must_have: list[str] | None,
     nice_to_have: list[str] | None,
 ) -> int:
-    """Deterministic 0-100 skill match for a job against a candidate profile.
-
-    Score formula (coverage weighted over breadth):
-
-      coverage  = matched_must / total_must  * 70   (do they need what I have?)
-      breadth   = matched_nice / total_nice * 20    (bonus overlap)
-      baseline  = 10  if any must-have hit (acknowledges relevance)
-
-    Returns 50 (neutral) when no skills are configured — the LLM carries the
-    decision in that case.
-    """
+    """Score positive role evidence, not coverage of the entire résumé stack."""
     haystack = _norm_text([
         job.get("title", ""),
         " ".join(job.get("tags", [])),
         job.get("description", ""),
     ])
 
-    must = [s for s in (must_have or []) if s]
-    nice = [s for s in (nice_to_have or []) if s]
-
-    if not must and not nice:
+    profile_skills = [s for s in [*(must_have or []), *(nice_to_have or [])] if s]
+    if not profile_skills:
         return 50
 
-    must_hits = sum(1 for s in must if _whole_token(haystack, s))
-    nice_hits = sum(1 for s in nice if _whole_token(haystack, s))
+    families = (
+        (30, ("python", "go", "java", "ruby", "typescript", "javascript", "c#")),
+        (25, ("django", "fastapi", "flask", "rails", "spring", "node.js", "express")),
+        (25, ("postgresql", "postgres", "mysql", "sql", "mongodb", "dynamodb")),
+        (20, ("aws", "gcp", "azure")),
+        (20, ("docker", "kubernetes", "k3s")),
+        (15, ("celery", "redis", "kafka", "rabbitmq", "queues", "microservices")),
+        (15, ("elasticsearch", "opensearch", "pgvector", "vector database")),
+    )
+    configured = {
+        i for i, (_, members) in enumerate(families)
+        if any(skill.lower() in members for skill in profile_skills)
+    }
+    matched = {
+        i for i, (_, members) in enumerate(families)
+        if i in configured and any(_whole_token(haystack, member) for member in members)
+    }
+    score = sum(families[i][0] for i in matched)
 
-    coverage = (must_hits / len(must) * 70) if must else 0
-    breadth = (nice_hits / len(nice) * 20) if nice else 0
-    baseline = 10 if must_hits else 0
-    return int(min(100, coverage + breadth + baseline))
+    # Exact configured tools outside known families still provide small evidence.
+    known = {member for _, members in families for member in members}
+    exact_other = sum(
+        1 for skill in profile_skills
+        if skill.lower() not in known and _whole_token(haystack, skill)
+    )
+    return min(100, score + min(20, exact_other * 5))
 
 
 # ── disqualifier detection ────────────────────────────────

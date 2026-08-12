@@ -15,7 +15,7 @@ Categorization (derived in code from the posting):
 - "location_restrictions": regions the role is limited to (empty = open)
 
 Code-computed matching signals (deterministic — trust these over your own gut read of the description):
-- "skill_overlap_score": 0-100 — how many of the candidate's must-have and nice-to-have skills appear in the posting. Computed by literal token matching in code. This is ground truth for stack coverage; do NOT override it without an explicit, concrete reason in red_flags.
+- "skill_overlap_score": 0-100 — positive stack evidence grouped across language, framework, data, cloud, containers, distributed systems, and search. Missing résumé skills are neutral because postings rarely list the candidate's entire stack. Treat this as strong evidence, not an absolute ceiling.
 - "disqualifier_hits": list of soft red flags detected in code (e.g. "region_locked_no_relocation"). Any hard disqualifier (clearance/citizenship/export control/required language the candidate lacks) has already been filtered out before you see the job — if you see a job here, it passed the hard filter, but treat a non-empty disqualifier_hits list as a strong negative.
 - "ghost_job_signals": list of legitimacy concerns detected in code (e.g. "staffing_agency_posting", "apply_off_platform", "commission_or_unpaid", "multiple_ongoing_openings", "vague_future_promise"). A non-empty list does NOT auto-reject the job, but you MUST treat each signal as a concrete red_flag and lower the score accordingly. If multiple signals fire, score it below 60 — Python decides what the UI displays.
 
@@ -30,7 +30,7 @@ Scoring factors (weight in order):
 Freshness is already guaranteed — spend your judgement on stack, seniority, and location/work-mode fit instead.
 
 Final score guidance:
-- Use skill_overlap_score as a ceiling unless you have a concrete, named reason in red_flags to deviate (e.g. "skill_overlap_score is 80 but the matched skills are only mentioned in passing while the role's core stack is X which the candidate lacks").
+- Use skill_overlap_score as an evidence anchor, not a ceiling. You may score higher for clear role/seniority/domain alignment or lower when matched tools are incidental and the required primary stack is missing; name the reason.
 - A job with skill_overlap_score of 30 should rarely score above 50 overall, no matter how nice the company.
 - A job with skill_overlap_score of 80+ AND good location/seniority fit should land in the 85-95 band.
 

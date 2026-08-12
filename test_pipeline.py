@@ -156,7 +156,7 @@ def test_analyze_jobs_merges_scores_onto_full_records(tmp_path, monkeypatch):
 
     # Profile with real must-have skills so the skill-overlap score is exercised.
     # The mock job's description is "Python FastAPI" with tags ["python"], so
-    # both python + fastapi must-haves hit → coverage = 100% → 70 pts baseline.
+    # Python + FastAPI provide language and web-family evidence (55).
     profile = {"must_have_skills": ["python", "fastapi"], "nice_to_have_skills": [],
                "seniority": "senior"}
 
@@ -169,10 +169,10 @@ def test_analyze_jobs_merges_scores_onto_full_records(tmp_path, monkeypatch):
     with patch.object(finder, "run_json", return_value=model_out):
         merged = finder.analyze_jobs(jobs, profile=profile)
 
-    # Final = 70% LLM (91) + 30% skill_overlap (80) = 63.7 + 24 = 87.7 → 88
-    assert merged[0]["score"] == 88
+    # Final = 70% LLM (91) + 30% skill evidence (55) = 80.2 → 80.
+    assert merged[0]["score"] == 80
     assert merged[0]["llm_score"] == 91
-    assert merged[0]["skill_overlap_score"] == 80
+    assert merged[0]["skill_overlap_score"] == 55
     assert merged[0]["source"] == "remoteok"          # preserved from base record
     assert merged[0]["posted_date"] == "2026-07-19T00:00:00+00:00"
     assert merged[0]["location"] == "Remote"
@@ -200,7 +200,7 @@ def test_analyze_jobs_applies_saved_preferences(tmp_path, monkeypatch):
     with patch.object(finder, "run_json", return_value=model_out):
         job = finder.analyze_jobs(jobs, profile=profile)[0]
     assert job["preference_adjustment"] == 2
-    assert job["score"] == 90
+    assert job["score"] == 82
 
 
 def test_analyze_jobs_hard_rejects_clearance_jobs(tmp_path, monkeypatch):
@@ -322,8 +322,8 @@ def test_analyze_jobs_survives_when_llm_omits_blocks(tmp_path, monkeypatch):
     with patch.object(finder, "run_json", return_value=model_out):
         merged = finder.analyze_jobs(_mock_raw_jobs(), profile=profile)
     assert merged[0]["blocks"] == {}
-    # Blend: 70% LLM (75) + 30% skill_overlap (80 — job has python) = 76.5 → 76
-    assert merged[0]["score"] == 76
+    # Blend: 70% LLM (75) + 30% language-family evidence (30) = 61.5 → 62.
+    assert merged[0]["score"] == 62
 
 
 def test_analyze_jobs_keeps_job_missing_from_ai_output(tmp_path, monkeypatch):

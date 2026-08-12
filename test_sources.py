@@ -237,3 +237,23 @@ def test_linkedin_paginates_dedupes_ids_and_fetches_detail(tmp_path, monkeypatch
     before = len(calls)
     sources.fetch_linkedin()
     assert len(calls) == before  # cached cards and details
+
+
+def test_fetch_ashby_normalizes_public_board(monkeypatch):
+    monkeypatch.setattr(sources, "ASHBY_COMPANIES", ["acme"])
+    monkeypatch.setattr(sources, "_get_json", lambda _: {"jobs": [{
+        "title": "Senior Backend Engineer",
+        "location": "Remote",
+        "secondaryLocations": [{"location": "Bangladesh"}],
+        "descriptionPlain": "Python FastAPI PostgreSQL",
+        "publishedAt": "2026-08-11T00:00:00Z",
+        "employmentType": "FullTime",
+        "isRemote": True,
+        "jobUrl": "https://jobs.ashbyhq.com/acme/1",
+    }]})
+    job = sources.fetch_ashby()[0]
+    assert job["company"] == "Acme"
+    assert job["location"] == "Remote; Bangladesh"
+    assert job["work_mode"] == "remote"
+    assert job["employment_type"] == "full-time"
+    assert "FastAPI" in job["description"]

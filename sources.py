@@ -894,6 +894,44 @@ def fetch_themuse() -> list[dict]:
     return jobs
 
 
+# Ashby's public posting API needs only the board slug from jobs.ashbyhq.com.
+ASHBY_COMPANIES = ["openai", "notion", "linear", "supabase", "ramp"]
+
+
+def fetch_ashby() -> list[dict]:
+    jobs: list[dict] = []
+    for board in ASHBY_COMPANIES:
+        try:
+            data = _get_json(f"https://api.ashbyhq.com/posting-api/job-board/{board}")
+        except (OSError, ValueError) as e:
+            print(f"  [sources] ashby '{board}' failed: {e}")
+            continue
+        for item in data.get("jobs", []):
+            if item.get("isListed") is False:
+                continue
+            locations = [item.get("location") or ""]
+            locations.extend(
+                (loc.get("location") or loc.get("name") or "")
+                for loc in (item.get("secondaryLocations") or [])
+            )
+            location = "; ".join(dict.fromkeys(x for x in locations if x)) or "Remote"
+            jobs.append(_job(
+                item.get("title"), board.replace("-", " ").title(), location,
+                item.get("jobUrl") or item.get("applyUrl"),
+                item.get("descriptionPlain") or item.get("descriptionHtml"),
+                parse_date(item.get("publishedAt")), "ashby",
+                [item.get("department") or "", item.get("team") or ""],
+                work_mode="remote" if item.get("isRemote") else detect_work_mode(
+                    location, item.get("descriptionPlain") or "",
+                    item.get("workplaceType", ""),
+                ),
+                employment_type=detect_employment_type(
+                    item.get("descriptionPlain") or "", item.get("employmentType", "")
+                ),
+            ))
+    return jobs
+
+
 # ── registry ──────────────────────────────────────────────
 ALL_SOURCES = {
     "remoteok": fetch_remoteok,
@@ -909,6 +947,7 @@ ALL_SOURCES = {
     "themuse": fetch_themuse,
     "greenhouse": fetch_greenhouse,
     "lever": fetch_lever,
+    "ashby": fetch_ashby,
     "hackernews": fetch_hackernews,
     "linkedin": fetch_linkedin,
 }
@@ -921,7 +960,7 @@ DEFAULT_SOURCES = [
     "remoteok", "remotive", "arbeitnow", "weworkremotely",
     "larajobs", "jobspresso", "vuejobs",
     "himalayas", "jobicy", "workingnomads",
-    "themuse", "greenhouse", "lever", "linkedin",
+    "themuse", "greenhouse", "lever", "ashby", "linkedin",
 ]
 
 

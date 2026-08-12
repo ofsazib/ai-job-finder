@@ -85,7 +85,7 @@ def test_enrich_repost_history_marks_second_url(tmp_path, monkeypatch):
     assert repost["first_seen_at"] == "2026-08-01T00:00:00+00:00"
 
 
-def test_run_pipeline_emits_all_steps(tmp_path, monkeypatch):
+def test_run_pipeline_emits_three_steps_without_cover_letters(tmp_path, monkeypatch):
     import finder
     monkeypatch.chdir(tmp_path)
     (tmp_path / "resume.md").write_text("# Resume\nPython, FastAPI")
@@ -102,14 +102,15 @@ def test_run_pipeline_emits_all_steps(tmp_path, monkeypatch):
     with patch.object(finder, "build_search_profile", return_value=profile), \
          patch.object(finder, "discover_jobs", return_value=_mock_raw_jobs()), \
          patch.object(finder, "analyze_jobs", return_value=analyzed), \
-         patch.object(finder, "generate_cover_letters") as gen:
+         patch.object(finder, "generate_cover_letter") as gen:
         result = finder.run_pipeline(on_progress=lambda s, l, st: events.append((s, st)))
 
-    for step in (1, 2, 3, 4):
+    for step in (1, 2, 3):
         assert (step, "running") in events
         assert (step, "done") in events
+    assert not any(step == 4 for step, _ in events)
     assert result == {"total": 1, "above_threshold": 1}
-    gen.assert_called_once()  # one "apply" job → cover letter generated
+    gen.assert_not_called()
 
 
 def test_run_pipeline_raises_when_resume_missing(tmp_path, monkeypatch):

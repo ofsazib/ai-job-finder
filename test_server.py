@@ -1,5 +1,6 @@
 import importlib
 import json
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -91,21 +92,23 @@ def test_post_status_rejects_invalid(client):
     assert r.status_code == 400
 
 
-def test_cover_letter_404_when_missing(client):
-    r = client.get("/api/cover-letter", params={"company": "Acme", "title": "Dev"})
+def test_cover_letter_rejects_unknown_job(client):
+    r = client.post("/api/cover-letter", json={"url": "https://missing.example/job"})
     assert r.status_code == 404
 
 
-def test_cover_letter_returns_content(client, tmp_path):
-    from finder import _slug
-    cl_dir = tmp_path / "output" / "cover_letters"
-    cl_dir.mkdir(parents=True)
-    slug = f"{_slug('Acme')}__{_slug('Backend Engineer')}"
-    (cl_dir / f"{slug}.md").write_text("Dear team, I am a great fit.")
+def test_cover_letter_generates_known_job_on_demand(client, tmp_path, monkeypatch):
+    import server
+    jobs = [{"url": "https://acme.example/job", "company": "Acme", "title": "Backend Engineer"}]
+    (tmp_path / "output" / "jobs.json").write_text(json.dumps(jobs))
+    generate = Mock(return_value=("Dear team, I am a great fit.", False))
+    monkeypatch.setattr(server, "generate_cover_letter", generate)
 
-    r = client.get("/api/cover-letter", params={"company": "Acme", "title": "Backend Engineer"})
+    r = client.post("/api/cover-letter", json={"url": jobs[0]["url"]})
     assert r.status_code == 200
     assert "great fit" in r.json()["content"]
+    assert r.json()["cached"] is False
+    generate.assert_called_once_with(jobs[0], regenerate=False)
 
 
 def test_preferences_default_and_round_trip(client):

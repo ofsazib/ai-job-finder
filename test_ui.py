@@ -22,3 +22,12 @@ def test_job_cards_and_modals_protect_narrow_layouts():
     assert 'class="job-card-header' in HTML
     assert 'class="job-card-actions' in HTML
     assert 'class="modal-panel' in HTML
+
+
+def test_cover_letters_are_generated_on_demand_with_visible_states():
+    assert 'onclick="openCL(this)"' in HTML
+    assert 'id="cl-regenerate"' in HTML
+    assert 'Generating cover letter…' in HTML
+    assert "method: 'POST'" in HTML
+    assert "regenerate: regenerate" in HTML
+    assert 'id="s4-icon"' not in HTML

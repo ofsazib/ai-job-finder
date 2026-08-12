@@ -1,25 +1,27 @@
 import json
 import queue
 import threading
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from matching import DEFAULT_PREFERENCES
 from resume import MAX_PDF_BYTES, ROOT_PDFS, ResumeError, generate_resume_md
+from finder import generate_cover_letter
 
 app = FastAPI(title="AI Job Finder")
 
 STATUS_FILE = Path("output/status.json")
 JOBS_FILE = Path("output/jobs.json")
-COVER_LETTERS_DIR = Path("output/cover_letters")
 PREFERENCES_FILE = Path("output/preferences.json")
 DISCOVERY_REPORT_FILE = Path("output/discovery_report.json")
 
 run_lock = threading.Lock()
+cover_letter_lock = threading.Lock()
 
 # Days before an applied job is considered "going quiet" and worth a follow-up.
 FOLLOWUP_THRESHOLD_DAYS = 10
@@ -92,6 +94,11 @@ class ManualJob(BaseModel):
     company: str = ""
     url: str = ""
     location: str = ""
+
+
+class CoverLetterRequest(BaseModel):
+    url: str
+    regenerate: bool = False
 
 
 @app.get("/api/preferences")
@@ -326,14 +333,26 @@ async def get_followups(days: int = 10):
     return JSONResponse(followups)
 
 
-@app.get("/api/cover-letter")
-async def get_cover_letter(company: str = Query(...), title: str = Query(...)):
-    from finder import _slug
-    slug = f"{_slug(company)}__{_slug(title)}"
-    path = COVER_LETTERS_DIR / f"{slug}.md"
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Cover letter not found")
-    return {"content": path.read_text(encoding="utf-8")}
+@app.post("/api/cover-letter")
+async def post_cover_letter(body: CoverLetterRequest):
+    if not JOBS_FILE.exists():
+        raise HTTPException(status_code=404, detail="Job not found")
+    jobs = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
+    job = next((item for item in jobs if item.get("url") == body.url), None)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    # ponytail: one global lock is enough for a local single-user app.
+    if not cover_letter_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="A cover letter is already being generated")
+    try:
+        content, cached = await asyncio.to_thread(
+            generate_cover_letter, job, regenerate=body.regenerate
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        cover_letter_lock.release()
+    return {"content": content, "cached": cached}
 
 
 @app.get("/api/run")

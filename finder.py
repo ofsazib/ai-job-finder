@@ -1,5 +1,5 @@
 # finder.py
-"""AI job finder — 4-step pipeline.
+"""AI job finder — three-step discovery and scoring pipeline.
 
     resume.md
        │
@@ -13,16 +13,12 @@
        ▼
   3. Analyze & score        AI CLI scores each surviving posting 0–100 against
        │                    the resume and gives a verdict.
-       ▼
-  4. Cover letters          For every "apply" verdict, the AI CLI drafts a
-       │                    tailored cover letter.
-       ▼
-   output/jobs.json + output/cover_letters/*.md
+   Cover letters are generated on demand from the dashboard and cached locally.
 
 The key difference from the old Firecrawl scraper: discovery yields real
 per-posting dates, so freshness is enforced deterministically (step 2) instead
 of being guessed by the model. The AI CLI is only spent on ranking + writing,
-where judgement actually helps.
+where judgement actually helps; cover-letter tokens are spent only on request.
 """
 from __future__ import annotations
 
@@ -643,37 +639,38 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
     return merged
 
 
-# ── step 4: cover letters ─────────────────────────────────
+# ── on-demand cover letters ───────────────────────────────
 def _slug(text: str, max_len: int = 40) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")[:max_len]
 
 
-def generate_cover_letters(jobs: list[dict]) -> None:
+def generate_cover_letter(job: dict, regenerate: bool = False) -> tuple[str, bool]:
     out_dir = OUTPUT_DIR / "cover_letters"
     out_dir.mkdir(parents=True, exist_ok=True)
-    prompt = (PROMPTS_DIR / "cover_letter.md").read_text(encoding="utf-8")
-    resume = _resume_text()
+    company = job.get("company") or "unknown"
+    title = job.get("title") or "role"
+    out_path = out_dir / f"{_slug(company)}__{_slug(title)}.md"
+    if out_path.exists() and not regenerate:
+        return out_path.read_text(encoding="utf-8"), True
 
-    for job in jobs:
-        company = job.get("company") or "unknown"
-        title = job.get("title") or "role"
-        out_path = out_dir / f"{_slug(company)}__{_slug(title)}.md"
-        print(f"  Cover letter: {company} — {title[:50]}")
-        try:
-            letter = run_text(
-                prompt,
-                context="---RESUME---\n" + resume + "\n---JOB---\n" + json.dumps(job, indent=2),
-            )
-            out_path.write_text(letter, encoding="utf-8")
-        except Exception as e:  # noqa: BLE001 — one bad letter shouldn't kill the batch
-            print(f"  Failed for {out_path.name}: {e}")
+    prompt = (PROMPTS_DIR / "cover_letter.md").read_text(encoding="utf-8")
+    letter = run_text(
+        prompt,
+        context="---RESUME---\n" + _resume_text() + "\n---JOB---\n" + json.dumps(job, indent=2),
+    ).strip()
+    if not letter:
+        raise RuntimeError("AI returned an empty cover letter.")
+    temporary = out_path.with_suffix(".md.tmp")
+    temporary.write_text(letter + "\n", encoding="utf-8")
+    temporary.replace(out_path)
+    return letter + "\n", False
 
 
 # ── orchestrator ──────────────────────────────────────────
 def run_pipeline(on_progress=None) -> dict:
-    """Run the full 4-step pipeline.
+    """Run the three-step discovery and scoring pipeline.
 
-    Calls on_progress(step, label, status) where step is 1-4, status is
+    Calls on_progress(step, label, status) where step is 1-3, status is
     "running" or "done". Returns {"total", "above_threshold"}.
     """
     def emit(step, label, status):
@@ -732,13 +729,7 @@ def run_pipeline(on_progress=None) -> dict:
     (OUTPUT_DIR / "discovery_report.json").write_text(json.dumps(report, indent=2))
     emit(3, "Analyzing & scoring", "done")
 
-    emit(4, "Generating cover letters", "running")
     good = [j for j in all_jobs if j.get("score", 0) >= THRESHOLD]
-    apply_jobs = [j for j in good if j.get("verdict") == "apply"]
-    if apply_jobs:
-        generate_cover_letters(apply_jobs)
-    emit(4, "Generating cover letters", "done")
-
     return {"total": len(all_jobs), "above_threshold": len(good)}
 
 

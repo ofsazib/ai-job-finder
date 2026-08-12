@@ -1,6 +1,6 @@
 # AI Job Finder
 
-An autonomous job-hunting pipeline that finds **recent** remote jobs and drafts tailored cover letters. It reads your resume, pulls fresh postings from structured job-board feeds, drops anything older than 30 days, scores each posting against your profile with your AI coding CLI (`claude`, `codex`, or `opencode`), and writes a cover letter for every role worth applying to — all reviewable in a local web dashboard.
+An autonomous job-hunting pipeline that finds **recent** remote jobs and drafts tailored cover letters on demand. It reads your resume, pulls fresh postings from structured job-board feeds, drops anything older than 30 days, and scores each posting against your profile with your AI coding CLI (`claude`, `codex`, or `opencode`) — all reviewable in a local web dashboard without spending tokens on unused cover letters.
 
 ## Why this exists
 
@@ -31,7 +31,7 @@ resume.md
 4. Analyze & score        AI CLI scores each posting 0–100 across 5 blocks
    │                      (stack / seniority / location / compensation / culture)
    ▼
-5. Cover letters          For each "apply" verdict, the AI CLI drafts a tailored letter
+5. Cover letters          Click a job to generate once, then reuse the local copy
    │
    ▼
 output/jobs.json + output/cover_letters/*.md
@@ -246,7 +246,7 @@ make test        # 139 tests
 ## Project structure
 
 ```
-finder.py         # 5-step pipeline (profile → discover → rank → analyze → cover letters)
+finder.py         # discovery/scoring pipeline + on-demand cached cover letters
 sources.py        # structured feeds, caching, dates, normalization, diagnostics
 matching.py       # skill scoring, hard-reject, region + language + ghost-job detection
 embedding.py      # sidecar HTTP client + sqlite-vec cache (semantic ranking)

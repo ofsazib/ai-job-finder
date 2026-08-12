@@ -43,7 +43,7 @@ You need all four on the host machine:
 
 | Requirement | Minimum | Why | Install |
 |---|---|---|---|
-| **Python** | **3.14** | Host pipeline + dashboard | [python.org](https://www.python.org/downloads/) · `pyenv install 3.14` |
+| **Python** | **3.12** | Host pipeline + dashboard; any newer version is accepted | [python.org](https://www.python.org/downloads/) · `pyenv install 3.12` |
 | **Docker + Compose** | Docker 24+ · Compose v2 | Runs the embedder sidecar (keeps fastembed + ONNX deps off the host) | [Docker Desktop](https://docs.docker.com/get-docker/) |
 | **AI coding CLI** | one of `claude` / `codex` / `opencode` | Scores postings + writes cover letters via your locally-installed CLI | [Claude Code](https://claude.com/claude-code) · [Codex](https://github.com/openai/codex) · [OpenCode](https://github.com/sst/opencode) |
 | **`make`** | any | One-command lifecycle (`make up`, `make down`) | macOS: bundled · Linux: `apt install build-essential` |
@@ -53,7 +53,7 @@ You need all four on the host machine:
 **Verify your setup:**
 
 ```bash
-python3 --version        # → 3.14.x
+python3 --version        # → 3.12 or newer
 docker compose version   # → Docker Compose version v2.x
 which claude             # → /usr/local/bin/claude (or codex / opencode)
 make --version           # → GNU Make 3.81+
@@ -69,6 +69,12 @@ The host Python env stays tiny (~50 MB). The dockerized embedder (`embedder/`) l
 git clone https://github.com/ofsazib/ai-job-finder.git
 cd ai-job-finder
 make setup       # creates .venv, installs host deps, copies .env.example → .env
+```
+
+`make setup` rejects Python older than 3.12 with the detected version in the error. If your compatible interpreter has a versioned name, select it explicitly:
+
+```bash
+make setup PYTHON_BIN=python3.13
 ```
 
 Then:
@@ -118,7 +124,7 @@ If docker isn't available, `make run` still works — the pipeline detects the m
 ### No `make` available
 
 ```bash
-python3.14 -m venv .venv
+python3 -m venv .venv    # python3 must be 3.12+
 .venv/bin/pip install -r requirements.txt
 cp .env.example .env
 .venv/bin/python server.py
@@ -213,7 +219,7 @@ Re-runs with no changes to jobs or resume are effectively free.
 
 ## Stack
 
-- **Python 3.14 + FastAPI** — pipeline orchestration and API (host)
+- **Python 3.12+ + FastAPI** — pipeline orchestration and API (host)
 - **Docker sidecar** — `fastembed` + ONNX Runtime + `MiniLM-L6-v2` (384-dim) embeddings
 - **sqlite-vec** — vector storage + cosine search inside SQLite (`output/embeddings.sqlite`)
 - **Structured feeds (stdlib `urllib`)** — dated job discovery, no crawler/API key

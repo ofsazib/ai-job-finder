@@ -1,6 +1,7 @@
-.PHONY: help setup run find test clean clean-docker clean-data clean-venv embedder-build embedder-up embedder-down embedder-logs embedder-health up down
+.PHONY: help check-python setup run find test clean clean-docker clean-data clean-venv embedder-build embedder-up embedder-down embedder-logs embedder-health up down
 
 # Use uv if available, else fall back to the local venv's python.
+PYTHON_BIN ?= python3
 PYTHON := $(shell command -v uv >/dev/null 2>&1 && echo "uv run python" || echo ".venv/bin/python")
 # Docker Compose v2 ships as a plugin (`docker compose`); v1 was a hyphenated
 # binary (`docker-compose`). Detect whichever exists so this works on either.
@@ -12,9 +13,22 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 # ── one-shot ─────────────────────────────────────────────
-setup: ## Install Python deps + create .env from template
-	@command -v uv >/dev/null 2>&1 && uv venv && uv pip install -r requirements.txt \
-		|| (python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)
+check-python: ## Verify the selected interpreter is Python 3.12+
+	@if ! command -v "$(PYTHON_BIN)" >/dev/null 2>&1; then \
+		echo "Error: Python interpreter '$(PYTHON_BIN)' was not found."; \
+		echo "Install Python 3.12+ or run: make setup PYTHON_BIN=python3.12"; \
+		exit 1; \
+	fi
+	@if ! "$(PYTHON_BIN)" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)'; then \
+		echo "Error: Python 3.12 or newer is required; detected $$($(PYTHON_BIN) --version 2>&1)."; \
+		echo "Install a newer Python or run: make setup PYTHON_BIN=python3.12"; \
+		exit 1; \
+	fi
+	@echo "$$($(PYTHON_BIN) --version) is supported."
+
+setup: check-python ## Install Python deps + create .env from template
+	@command -v uv >/dev/null 2>&1 && uv venv --python "$(PYTHON_BIN)" && uv pip install -r requirements.txt \
+		|| ("$(PYTHON_BIN)" -m venv .venv && .venv/bin/pip install -r requirements.txt)
 	@test -f .env || cp .env.example .env
 	@echo "Setup done. Add resume.md/resume.pdf/cv.pdf, then 'make up'."
 

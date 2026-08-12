@@ -21,7 +21,7 @@ resume.md
    │                      from your resume
    ▼
 2. Discover (structured)  Fetch dated postings from job-board feeds,
-   │                      drop anything > 30 days old, keyword-prefilter,
+   │                      drop anything > 30 days old, title/role-filter,
    │                      and categorize each (work mode, locale, salary…)
    ▼
 3. Analyze & score        AI CLI scores each posting 0–100 against your
@@ -49,10 +49,23 @@ All free, no API key, each returns a per-posting date:
 | [The Muse](https://www.themuse.com/developers/api/v2) | JSON API | `publication_date` | tech roles (Software Engineering / Data Science) |
 | [Greenhouse](https://developers.greenhouse.io/job-board.html) | JSON API | `updated_at` | public company boards (Stripe, Databricks, GitLab, Figma, Vercel, …) |
 | [Lever](https://github.com/lever/postings-api) | JSON API | `createdAt` | public company boards (Netflix, Spotify, Plaid, Notion, …) |
-| Hacker News "Who is hiring" | Algolia API | `created_at_i` | opt-in (freeform comments) |
-| LinkedIn (guest jobs) | HTML | `datetime` | opt-in; **onsite + Bangladesh-local** roles, HTML-scraped & rate-limited |
+| [Ashby](https://developers.ashbyhq.com/docs/public-job-posting-api) | JSON API | `publishedAt` | OpenAI, Notion, Linear, Supabase, Ramp; full descriptions |
+| Hacker News "Who is hiring" | Algolia API | `created_at_i` | freeform comments; strict role filtering |
+| LinkedIn (guest jobs) | HTML | `datetime` | **onsite + Bangladesh-local** roles; cached, rate-limited, best effort |
 
-Ten feeds are enabled by default. Greenhouse and Lever pull public, dated JSON from a curated list of well-known tech companies (edit `GREENHOUSE_COMPANIES` / `LEVER_COMPANIES` in `sources.py` to taste). `hackernews` and `linkedin` are opt-in via `SOURCES` — HN because its posts are freeform, LinkedIn because it's HTML-scraped and can rate-limit by IP. LinkedIn is the source of **onsite** and **Bangladesh-local** postings.
+All adapters are enabled by default. Greenhouse, Lever, and Ashby pull public company boards; add board slugs through environment variables without changing Python. LinkedIn uses its public guest pages because LinkedIn has no general public search API. It fetches only relevant cards, caches responses, delays uncached requests, and fails without stopping other sources.
+
+## Matching and discovery diagnostics
+
+Discovery is title-first. Target backend/Python/platform roles pass directly; generic engineering titles need at least two concrete profile skills. Unrelated sales, procurement, design, manual-QA, DevOps, frontend, Node, and JVM titles do not pass unless the generated profile explicitly targets that family.
+
+Skill scoring measures positive evidence across language, web framework, database, cloud, containers, distributed systems, and search families. A posting is not penalized for omitting every technology on the resume. The AI must return an evaluation for every eligible URL; omitted evaluations remain visible as `analysis_missing` instead of disappearing.
+
+The dashboard's discovery funnel shows, per source:
+
+`fetched → fresh → role relevant → eligible → analyzed → shortlisted`
+
+Use it to distinguish a source outage from irrelevant results, location rejection, incomplete AI output, or genuinely low scores.
 
 ## Categorization
 
@@ -98,7 +111,7 @@ python server.py            # → http://127.0.0.1:8000
 python finder.py
 ```
 
-Results land in `output/` (gitignored): `jobs.json` (scored jobs), `raw_jobs.json` (everything discovered after filtering), and `cover_letters/`.
+Results land in `output/` (gitignored): `jobs.json`, `raw_jobs.json`, `discovery_report.json`, cached public source pages, and `cover_letters/`.
 
 ## Configuration
 
@@ -108,8 +121,13 @@ All optional, via `.env` or environment:
 |---|---|---|
 | `AI_CLI` | `claude` | Which CLI drives analysis: `claude`, `codex`, `opencode` |
 | `MAX_JOB_AGE_DAYS` | `30` | Freshness cutoff — jobs older than this are dropped |
-| `MAX_JOBS_TO_ANALYZE` | `40` | Cap on how many (freshest) jobs get AI scoring |
-| `SOURCES` | 7 defaults | Comma-separated subset, e.g. `remoteok,himalayas`. Add `linkedin` (onsite + BD-local) or `hackernews` to include the opt-in sources. |
+| `MAX_JOBS_TO_ANALYZE` | `100` | Round-robin cap across sources before AI scoring |
+| `SOURCES` | all defaults | Comma-separated subset, e.g. `linkedin,ashby,greenhouse` |
+| `LINKEDIN_MAX_PAGES` | `2` | Pages per LinkedIn query; keep conservative |
+| `SOURCE_CACHE_HOURS` | `6` | Public-page cache lifetime |
+| `GREENHOUSE_COMPANIES` | empty | Additional board slugs, comma-separated |
+| `LEVER_COMPANIES` | empty | Additional company slugs, comma-separated |
+| `ASHBY_COMPANIES` | empty | Additional board slugs, comma-separated |
 
 ## Tests
 
@@ -121,9 +139,9 @@ pytest
 
 ```
 finder.py         # 4-step pipeline (profile → discover → analyze → cover letters)
-sources.py        # structured job feeds + deterministic date/keyword filtering
+sources.py        # structured feeds, caching, dates, normalization, diagnostics
 ai_cli.py         # configurable CLI runner (claude/codex/opencode) + JSON extraction
-server.py         # FastAPI: /api/jobs, /api/status, /api/cover-letter, /api/run (SSE)
+server.py         # FastAPI jobs, funnel report, tracking, cover letters, SSE run
 ui/index.html     # single-file dashboard
 prompts/          # AI prompt files for each step
 CLAUDE.md         # agent context

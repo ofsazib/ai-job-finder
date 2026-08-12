@@ -1,0 +1,26 @@
+# Don't ship local state into the docker image.
+output/
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.env
+resume.md
+*.json
+ui/
+prompts/
+.DS_Store
+
+# Tests + project meta never needed inside the embedder container.
+test_*.py
+finder.py
+server.py
+sources.py
+matching.py
+ai_cli.py
+resume.py
+README.md
+CLAUDE.md
+Makefile
+pytest_cache/

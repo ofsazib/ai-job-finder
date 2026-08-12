@@ -1,0 +1,33 @@
+# Run the embedder service as a sidecar to the local ai-job-finder.
+# The main pipeline stays on the host (it needs the locally-installed
+# AI CLI: claude / codex / opencode). Only the embedding workload is
+# containerized — keeps model deps (fastembed, onnxruntime) off the host.
+#
+#   docker compose up -d embedder
+#   python server.py    # host
+#
+# Embedder health check: curl http://localhost:8787/health
+
+services:
+  embedder:
+    build: ./embedder
+    image: ai-job-finder-embedder
+    container_name: ai-job-finder-embedder
+    ports:
+      - "8787:8787"
+    volumes:
+      # Persist downloaded ONNX weights across container restarts.
+      - embedder-models:/data/models
+    environment:
+      EMBEDDER_MODEL: Qdrant/MiniLM-L6-v2-v3
+      EMBEDDER_CACHE_DIR: /data/models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8787/health').status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s   # first run downloads the model
+
+volumes:
+  embedder-models:

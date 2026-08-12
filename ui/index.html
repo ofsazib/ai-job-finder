@@ -350,6 +350,40 @@
     </div>
   </div>
 
+  <!-- Outcome Modal -->
+  <div id="outcome-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm
+     flex items-center justify-center z-50 p-4" onclick="if(event.target===this)closeOutcome()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md fade-up ring-1 ring-slate-200">
+      <div class="flex justify-between items-center px-6 py-4 border-b border-slate-100 shrink-0">
+        <div>
+          <h3 class="font-bold text-slate-900 leading-none">Record outcome</h3>
+          <p id="outcome-subtitle" class="text-xs text-slate-400 mt-1.5 leading-none"></p>
+        </div>
+        <button onclick="closeOutcome()"
+          class="text-slate-400 hover:text-slate-700 hover:bg-slate-100 w-8 h-8 rounded-lg
+                 text-xl leading-none transition flex items-center justify-center">&times;</button>
+      </div>
+      <div class="px-6 py-5">
+        <input id="outcome-url" type="hidden">
+        <p class="text-[12px] font-semibold uppercase tracking-wider text-slate-400 mb-2">What happened?</p>
+        <div id="outcome-options" class="grid grid-cols-2 gap-2 mb-4"></div>
+        <label class="text-[12px] font-semibold uppercase tracking-wider text-slate-400">Note (optional)</label>
+        <textarea id="outcome-note" rows="2"
+          class="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-[13px] text-slate-700
+                 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 transition
+                 resize-none"
+          placeholder="e.g. First round scheduled for Aug 20"></textarea>
+      </div>
+      <div class="px-6 pb-5">
+        <button onclick="submitOutcome()"
+          class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 rounded-xl
+                 transition text-sm">
+          Save outcome
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script>
     let allJobs = [];
 
@@ -661,6 +695,50 @@
       }
     }
 
+    /* ── stats + followups ───────────────────────────────── */
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/stats');
+        const stats = await res.json();
+        const row = document.getElementById('stats-row');
+        if (!stats || !stats.total) { row.classList.add('hidden'); return; }
+        row.classList.remove('hidden');
+        document.getElementById('stat-total').textContent = stats.total;
+        document.getElementById('stat-apply').textContent = stats.by_verdict?.apply ?? 0;
+        document.getElementById('stat-tracked').textContent = stats.tracked;
+        const outcomes = Object.values(stats.by_outcome || {}).reduce((a, b) => a + b, 0);
+        document.getElementById('stat-outcomes').textContent = outcomes;
+      } catch (e) {
+        console.error('Failed to load stats', e);
+      }
+    }
+
+    async function loadFollowups() {
+      try {
+        const res = await fetch('/api/followups?days=10');
+        const items = await res.json();
+        const section = document.getElementById('followup-section');
+        const list = document.getElementById('followup-list');
+        if (!items.length) { section.classList.add('hidden'); return; }
+        section.classList.remove('hidden');
+        document.getElementById('followup-count').textContent = `${items.length} waiting`;
+        list.innerHTML = items.map(f => `
+          <div class="bg-white border border-amber-200/80 rounded-xl p-3.5 shadow-sm flex items-center gap-3">
+            <div class="flex-1 min-w-0">
+              <p class="text-[13px] font-semibold text-slate-800 leading-snug truncate">${esc(f.title)}</p>
+              <p class="text-[12px] text-slate-500 mt-0.5">${esc(f.company)} · applied ${f.days_since} days ago</p>
+            </div>
+            <button onclick="openOutcome('${esc(f.url)}','${esc(f.company)}','${esc(f.title)}')"
+              class="text-[12px] font-medium bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5
+                     rounded-lg transition shrink-0">
+              Update
+            </button>
+          </div>`).join('');
+      } catch (e) {
+        console.error('Failed to load followups', e);
+      }
+    }
+
     function renderJobs() {
       const verdict = document.getElementById('filter-verdict').value;
       const mode = document.getElementById('filter-mode').value;
@@ -745,6 +823,12 @@
                    text-slate-700 px-3.5 py-1.5 rounded-lg transition">
             Cover letter
           </button>
+          ${(job.status === 'applied') ? `
+          <button onclick="openOutcome('${esc(job.url ?? '')}','${esc(job.company ?? '')}','${esc(job.title ?? '')}')"
+            class="text-[13px] font-medium bg-amber-500 hover:bg-amber-600 text-white px-3.5 py-1.5
+                   rounded-lg transition">
+            Record outcome
+          </button>` : ''}
           <button onclick="toggleStatus('${esc(job.url ?? '')}','${esc(job.status ?? 'none')}')"
             class="text-[13px] font-medium px-3.5 py-1.5 rounded-lg transition ml-auto ${statusCls(job.status)}">
             ${statusLabel(job.status)}
@@ -778,6 +862,8 @@
         const job = allJobs.find(j => j.url === url);
         if (job) job.status = next;
         renderJobs();
+        loadStats();
+        loadFollowups();
       } catch {
         showError('Failed to save status. Try again.');
       }
@@ -930,6 +1016,8 @@
     if (saved) document.getElementById('last-run').textContent = `Last run: ${saved}`;
     checkResume().catch(() => {});
     loadJobs();
+    loadStats();
+    loadFollowups();
   </script>
 </body>
 

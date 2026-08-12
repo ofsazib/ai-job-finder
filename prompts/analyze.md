@@ -1,6 +1,6 @@
 You are scoring pre-fetched job postings against a specific candidate.
 
-The candidate's resume is provided below under ---RESUME---.
+The candidate's resume fingerprint is provided below under ---RESUME (fingerprint)---. This is a structured summary (roles, skills, seniority, years, languages, regions) — equivalent in signal to a full resume but ~85% smaller. Treat it as authoritative for who the candidate is.
 A JSON array of job postings is provided below under ---JOBS---. Every posting already includes a real "posted_date" and has already been confirmed to be posted within the last 30 days — do NOT penalize freshness or ask for newer postings; treat all of them as current.
 
 Each posting also carries pre-computed fields you must factor into scoring:

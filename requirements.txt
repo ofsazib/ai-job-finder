@@ -4,3 +4,5 @@ python-dotenv
 pytest
 httpx
 pypdf
+numpy
+sqliteai-vector

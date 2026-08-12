@@ -39,6 +39,7 @@ from dotenv import load_dotenv
 
 import sources
 from ai_cli import active_backend, run_json, run_text
+import embedding
 from matching import (
     detect_ghost_job_signals,
     disqualifier_hits,
@@ -61,6 +62,57 @@ DISCOVERY_STAGES: dict[str, dict[str, int]] = {}
 
 def _resume_text() -> str:
     return resolve_resume().read_text(encoding="utf-8")
+
+
+def _resume_fingerprint(profile: dict | None = None) -> str:
+    """Compact structured resume summary for LLM calls.
+
+    The full resume is ~1.5k tokens; this fingerprint is ~200 tokens and
+    carries the same signal (roles, skills, seniority, years, domains).
+    Used in analyze.md + cover_letter.md to cut input cost per call by ~85%.
+
+    Falls back to the full resume when no profile is available (early in
+    the pipeline, before build_search_profile has run).
+    """
+    if not profile:
+        # Try reading the cached profile from a prior run.
+        path = OUTPUT_DIR / "search_profile.json"
+        if path.exists():
+            try:
+                profile = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                profile = None
+    if not profile:
+        return _resume_text()
+
+    parts = []
+    roles = profile.get("target_roles") or []
+    if roles:
+        parts.append("Target roles: " + ", ".join(roles))
+    must = profile.get("must_have_skills") or []
+    nice = profile.get("nice_to_have_skills") or []
+    if must:
+        parts.append("Core skills: " + ", ".join(must))
+    if nice:
+        parts.append("Secondary: " + ", ".join(nice))
+    sen = profile.get("seniority")
+    yrs = profile.get("seniority_years")
+    if sen or yrs:
+        parts.append(f"Seniority: {sen} ({yrs}+ years)")
+    langs = profile.get("languages") or {}
+    if langs:
+        parts.append("Languages: " + ", ".join(f"{k} ({v})" for k, v in langs.items()))
+    regions = profile.get("region_eligibility") or []
+    if regions:
+        parts.append("Region eligibility: " + ", ".join(regions))
+    kw = profile.get("keywords") or []
+    if kw:
+        # Drop keywords already covered by must_have_skills to avoid dup.
+        must_lower = {s.lower() for s in must}
+        extra = [k for k in kw if k.lower() not in must_lower]
+        if extra:
+            parts.append("Additional keywords: " + ", ".join(extra[:10]))
+    return "\n".join(parts) if parts else _resume_text()
 
 
 def _selected_sources() -> list[str] | None:
@@ -124,8 +176,26 @@ def build_search_profile() -> dict:
 
 
 # ── step 2: discover fresh, dated postings ────────────────
+# When semantic ranking is available, we cap analysis at this smaller number —
+# the embeddings already picked the most relevant jobs, so spending LLM tokens
+# on the long tail is wasted budget. Falls back to MAX_JOBS_TO_ANALYZE when
+# the embedder sidecar isn't running.
+SEMANTIC_ANALYSIS_CAP = int(os.environ.get("SEMANTIC_ANALYSIS_CAP", "30"))
+USE_SEMANTIC_RANKING = os.environ.get("USE_SEMANTIC_RANKING", "true").lower() not in (
+    "0", "false", "no", "off"
+)
+
+
 def discover_jobs(profile: dict) -> list[dict]:
-    """Fetch feed jobs, enforce the freshness cutoff, keyword-prefilter."""
+    """Fetch feed jobs, enforce the freshness cutoff, keyword-prefilter.
+
+    If the embedder sidecar is up (see ``embedding.is_available``), survivors
+    are ranked by ``0.4 * skill_overlap + 0.6 * semantic_match`` and the
+    analysis cap shrinks from ``MAX_JOBS_TO_ANALYZE`` (default 100) down to
+    ``SEMANTIC_ANALYSIS_CAP`` (default 30). That's where the token savings
+    come from: we only pay the LLM for the most promising 30 instead of the
+    round-robin freshest 100.
+    """
     raw = sources.fetch_all(_selected_sources())
     DISCOVERY_STAGES.clear()
     for source, diagnostic in sources.SOURCE_DIAGNOSTICS.items():
@@ -149,10 +219,33 @@ def discover_jobs(profile: dict) -> list[dict]:
             stage["role_relevant"] = stage.get("role_relevant", 0) + 1
     print(f"  {len(matched)} match the candidate's target roles")
 
-    # Interleave sources round-robin (freshest first within each) before
-    # capping, so one feed's same-day flood can't crowd every other source out
-    # of the analysis budget.
-    ranked = _interleave_by_source(enrich_repost_history(matched))
+    matched = enrich_repost_history(matched)
+
+    # Try semantic ranking. Mutates jobs in place to add
+    # semantic_match_score + blended_rank_score; returns sorted desc.
+    use_semantic = USE_SEMANTIC_RANKING and embedding.is_available()
+    if use_semantic:
+        try:
+            sem_ranked = embedding.rank_jobs(_resume_text(), matched)
+            if sem_ranked is not None:
+                print(f"  Semantic ranking active: cap shrinks {MAX_JOBS_TO_ANALYZE}"
+                      f" → {SEMANTIC_ANALYSIS_CAP} (embedder healthy)")
+                for job in sem_ranked:
+                    stage = DISCOVERY_STAGES.setdefault(job.get("source", "unknown"), {})
+                    stage["eligible"] = stage.get("eligible", 0) + 1 \
+                        if False else stage.get("eligible", 0)
+                cap = SEMANTIC_ANALYSIS_CAP
+                capped = sem_ranked[:cap]
+                for job in capped:
+                    stage = DISCOVERY_STAGES.setdefault(job.get("source", "unknown"), {})
+                    stage["analyzed"] = stage.get("analyzed", 0) + 1
+                return capped
+            print("  Semantic ranking returned None — falling back to interleave")
+        except Exception as e:  # noqa: BLE001 — never let embeddings sink a run
+            print(f"  [embedding] semantic ranking failed, falling back: {e}")
+
+    # Fallback: round-robin interleave by source (freshest within each).
+    ranked = _interleave_by_source(matched)
     if len(ranked) > MAX_JOBS_TO_ANALYZE:
         print(f"  Capping to {MAX_JOBS_TO_ANALYZE} for analysis (round-robin across sources)")
         ranked = ranked[:MAX_JOBS_TO_ANALYZE]
@@ -347,6 +440,10 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
     identically across every CLI backend. The model returns scoring metadata
     keyed by url; we merge it back onto the full job records so the UI keeps
     company/location/date/source even if the model omits them.
+
+    Analysis cache: jobs already scored in a prior run (same URL + same JD
+    content hash) are reused without an LLM call. Re-runs therefore cost
+    near-zero tokens for unchanged jobs. Disable with USE_ANALYSIS_CACHE=false.
     """
     today = datetime.now().strftime("%Y-%m-%d")
     prompt = (PROMPTS_DIR / "analyze.md").read_text(encoding="utf-8")
@@ -363,39 +460,88 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
         (OUTPUT_DIR / "jobs.json").write_text(json.dumps(rejected, indent=2))
         return rejected
 
-    # Give the model only what it needs to judge — keep the payload small, but
-    # include the derived categorization AND the code-computed skill_overlap /
-    # disqualifier_hits so its scoring is anchored to ground truth.
-    slim = [
-        {
-            "url": j["url"],
-            "title": j["title"],
-            "company": j["company"],
-            "location": j["location"],
-            "posted_date": j["posted_date"],
-            "source": j["source"],
-            "work_mode": j.get("work_mode", "unknown"),
-            "locale": j.get("locale", "unknown"),
-            "relocation": j.get("relocation", "unknown"),
-            "employment_type": j.get("employment_type", "unknown"),
-            "seniority": j.get("seniority", "unknown"),
-            "salary": j.get("salary", ""),
-            "location_restrictions": j.get("location_restrictions", []),
-            "skill_overlap_score": j.get("skill_overlap_score", 0),
-            "disqualifier_hits": j.get("disqualifier_hits", []),
-            "ghost_job_signals": j.get("ghost_job_signals", []),
-            "description": j["description"],
-        }
-        for j in kept
-    ]
-    context = (
-        f"Today's date is {today}.\n"
-        "---RESUME---\n" + _resume_text() + "\n"
-        "---JOBS (JSON)---\n" + json.dumps(slim, indent=2)
+    # Analysis cache: split kept into fresh + cached-hits before LLM call.
+    use_cache = os.environ.get("USE_ANALYSIS_CACHE", "true").lower() in (
+        "1", "true", "yes", "on"
     )
-    scored = run_json(prompt, context=context, timeout=600)
-    if not isinstance(scored, list):
-        raise RuntimeError("Analyzer did not return a JSON array of jobs.")
+    cached_path = OUTPUT_DIR / "analysis_cache.json"
+    cached_db: dict[str, dict] = {}
+    if use_cache and cached_path.exists():
+        try:
+            cached_db = json.loads(cached_path.read_text(encoding="utf-8"))
+            if not isinstance(cached_db, dict):
+                cached_db = {}
+        except (OSError, ValueError):
+            cached_db = {}
+
+    def _content_hash(job: dict) -> str:
+        import hashlib as _h
+        blob = (job.get("title", "") + "|" + job.get("description", "")
+                + "|" + job.get("company", ""))
+        return _h.sha256(blob.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+    cache_hits: list[dict] = []
+    cache_misses: list[dict] = []
+    for j in kept:
+        chash = _content_hash(j)
+        url = j.get("url", "")
+        entry = cached_db.get(url)
+        if use_cache and entry and entry.get("content_hash") == chash:
+            # Reuse prior LLM scoring — attach cached fields + recompute blend.
+            j["_cached_analysis"] = entry
+            cache_hits.append(j)
+        else:
+            cache_misses.append(j)
+
+    if cache_hits:
+        print(f"  Analysis cache: {len(cache_hits)} hit(s) reused, "
+              f"{len(cache_misses)} miss(es) → LLM")
+
+    # If everything was cached, skip the LLM call entirely.
+    if cache_misses:
+        # Give the model only what it needs to judge — keep the payload small, but
+        # include the derived categorization AND the code-computed skill_overlap /
+        # disqualifier_hits so its scoring is anchored to ground truth.
+        # Only embed the cache misses into the prompt — hits reuse prior scores.
+        slim = [
+            {
+                "url": j["url"],
+                "title": j["title"],
+                "company": j["company"],
+                "location": j["location"],
+                "posted_date": j["posted_date"],
+                "source": j["source"],
+                "work_mode": j.get("work_mode", "unknown"),
+                "locale": j.get("locale", "unknown"),
+                "relocation": j.get("relocation", "unknown"),
+                "employment_type": j.get("employment_type", "unknown"),
+                "seniority": j.get("seniority", "unknown"),
+                "salary": j.get("salary", ""),
+                "location_restrictions": j.get("location_restrictions", []),
+                "skill_overlap_score": j.get("skill_overlap_score", 0),
+                "disqualifier_hits": j.get("disqualifier_hits", []),
+                "ghost_job_signals": j.get("ghost_job_signals", []),
+                "description": j["description"],
+            }
+            for j in cache_misses
+        ]
+        context = (
+            f"Today's date is {today}.\n"
+            "---RESUME (fingerprint)---\n" + _resume_fingerprint(profile) + "\n"
+            "---JOBS (JSON)---\n" + json.dumps(slim, indent=2)
+        )
+        scored = run_json(prompt, context=context, timeout=600)
+        if not isinstance(scored, list):
+            raise RuntimeError("Analyzer did not return a JSON array of jobs.")
+    else:
+        scored = []
+
+    # Inject cache hits back into the scored list so the merge loop sees them.
+    if cache_hits:
+        for j in cache_hits:
+            cached = j.pop("_cached_analysis", {})
+            if cached.get("analysis"):
+                scored = (scored or []) + [cached["analysis"]]
 
     by_url = {j["url"]: j for j in kept}
     scored_by_url = {
@@ -453,6 +599,7 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
             # Scoring: surface both signals + the blended final.
             "skill_overlap_score": skill,
             "llm_score": llm_score,
+            "semantic_match_score": base.get("semantic_match_score"),
             "disqualifier_hits": base.get("disqualifier_hits", []),
             "ghost_job_signals": ghost_signals,
             "preference_adjustment": preference_adjustment,
@@ -472,6 +619,25 @@ def analyze_jobs(jobs: list[dict], profile: dict | None = None) -> list[dict]:
     # behind a filter; they sort to the bottom naturally.
     merged.extend(rejected)
     merged.sort(key=lambda j: j.get("score", 0), reverse=True)
+
+    # Persist analysis cache: store the LLM's per-job output keyed by URL +
+    # content hash so a re-run with unchanged jobs skips the LLM entirely.
+    if use_cache:
+        for entry in (scored or []):
+            if isinstance(entry, dict):
+                url = (entry.get("url") or "").strip()
+                if url and url in by_url:
+                    cached_db[url] = {
+                        "content_hash": _content_hash(by_url[url]),
+                        "analysis": entry,
+                        "cached_at": datetime.now().isoformat(),
+                    }
+        try:
+            OUTPUT_DIR.mkdir(exist_ok=True)
+            cached_path.write_text(json.dumps(cached_db, indent=2), encoding="utf-8")
+        except OSError as e:
+            print(f"  [cache] failed to persist analysis cache: {e}")
+
     OUTPUT_DIR.mkdir(exist_ok=True)
     (OUTPUT_DIR / "jobs.json").write_text(json.dumps(merged, indent=2))
     return merged

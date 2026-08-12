@@ -42,12 +42,14 @@ from __future__ import annotations
 import html
 import hashlib
 import json
+import os
 import re
 import time
 import unicodedata
 import urllib.request
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from xml.etree import ElementTree
 
 USER_AGENT = "ai-job-finder/1.0 (+https://github.com/ofsazib)"
@@ -663,16 +665,36 @@ LINKEDIN_GUEST_URL = (
 # (keywords, location) pairs. Bangladesh pulls local onsite/hybrid roles;
 # the "Remote" pass pulls international remote roles LinkedIn indexes.
 LINKEDIN_SEARCHES = [
-    ("software engineer python", "Bangladesh"),
-    ("backend developer", "Bangladesh"),
-    ("software engineer python remote", "Worldwide"),
+    ("senior python engineer", "Bangladesh"),
+    ("backend engineer", "Bangladesh"),
+    ("django OR fastapi developer", "Bangladesh"),
+    ("platform engineer", "Bangladesh"),
+    ("backend tech lead", "South Asia"),
+    ("senior python engineer remote", "Worldwide"),
 ]
 _LI_CARD_RE = re.compile(r'<li>.*?</li>', re.S)
+_LI_RELEVANT_TITLE_RE = re.compile(
+    r"\b(python|backend|back-end|platform|django|fastapi|software\s+engineer"
+    r"|tech(?:nical)?\s+lead|software\s+architect)\b", re.I
+)
 
 
 def _linkedin_field(card: str, pattern: str) -> str:
     m = re.search(pattern, card, re.S)
     return strip_html(m.group(1)).strip() if m else ""
+
+
+def _cached_public_get(url: str, namespace: str) -> bytes:
+    cache_dir = Path("output/source_cache") / namespace
+    cache_path = cache_dir / (hashlib.sha256(url.encode()).hexdigest() + ".html")
+    ttl = max(0, int(os.environ.get("SOURCE_CACHE_HOURS", "6"))) * 3600
+    if cache_path.exists() and time.time() - cache_path.stat().st_mtime <= ttl:
+        return cache_path.read_bytes()
+    data = _get(url)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path.write_bytes(data)
+    time.sleep(1)
+    return data
 
 
 def fetch_linkedin() -> list[dict]:
@@ -685,31 +707,53 @@ def fetch_linkedin() -> list[dict]:
     from urllib.parse import quote
 
     jobs: list[dict] = []
+    seen_ids: set[str] = set()
+    max_pages = max(1, min(4, int(os.environ.get("LINKEDIN_MAX_PAGES", "2"))))
     for keywords, location in LINKEDIN_SEARCHES:
-        url = f"{LINKEDIN_GUEST_URL}?keywords={quote(keywords)}&location={quote(location)}&f_TPR=r2592000&start=0"
-        try:
-            html_text = _get(url).decode("utf-8", errors="replace")
-        except OSError as e:
-            print(f"  [sources] linkedin '{keywords}/{location}' failed: {e}")
-            continue
-        for card in _LI_CARD_RE.findall(html_text):
-            link = _linkedin_field(card, r'base-card__full-link[^>]*href="([^"?]+)')
-            title = _linkedin_field(card, r'base-search-card__title">(.*?)</')
-            company = _linkedin_field(card, r'base-search-card__subtitle">(.*?)</')
-            loc = _linkedin_field(card, r'job-search-card__location">(.*?)</') or location
-            dt_raw = _linkedin_field(card, r'datetime="([^"]+)"')
-            if not (link and title):
-                continue
-            jobs.append(_job(
-                title=title,
-                company=company,
-                location=loc,
-                url=link,
-                description=f"{title} at {company}. Location: {loc}. (LinkedIn listing — open for full details.)",
-                dt=parse_date(dt_raw),
-                source="linkedin",
-                tags=[],
-            ))
+        for page in range(max_pages):
+            url = (f"{LINKEDIN_GUEST_URL}?keywords={quote(keywords)}&location="
+                   f"{quote(location)}&f_TPR=r2592000&start={page * 25}")
+            try:
+                html_text = _cached_public_get(url, "linkedin").decode("utf-8", errors="replace")
+            except OSError as e:
+                print(f"  [sources] linkedin '{keywords}/{location}' failed: {e}")
+                break
+            cards = _LI_CARD_RE.findall(html_text)
+            if not cards:
+                break
+            for card in cards:
+                job_id = _linkedin_field(card, r'urn:li:jobPosting:(\d+)')
+                link = _linkedin_field(card, r'base-card__full-link[^>]*href="([^"?]+)')
+                title = _linkedin_field(card, r'base-search-card__title">(.*?)</')
+                company = _linkedin_field(card, r'base-search-card__subtitle">(.*?)</')
+                loc = _linkedin_field(card, r'job-search-card__location">(.*?)</') or location
+                dt_raw = _linkedin_field(card, r'datetime="([^"]+)"')
+                if not (job_id and link and title) or job_id in seen_ids \
+                        or not _LI_RELEVANT_TITLE_RE.search(title):
+                    continue
+                seen_ids.add(job_id)
+                incomplete = False
+                detail_url = f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
+                try:
+                    detail = _cached_public_get(
+                        detail_url, "linkedin",
+                    ).decode("utf-8", errors="replace")
+                    description = _linkedin_field(
+                        detail, r'show-more-less-html__markup[^>]*>(.*?)</div>'
+                    )
+                except OSError:
+                    description = ""
+                    cache_dir = Path("output/source_cache/linkedin")
+                    cache_dir.mkdir(parents=True, exist_ok=True)
+                    (cache_dir / (hashlib.sha256(detail_url.encode()).hexdigest() + ".html")).write_bytes(b"")
+                if not description:
+                    incomplete = True
+                    description = f"{title} at {company}. Location: {loc}."
+                job = _job(title, company, loc, link, description, parse_date(dt_raw),
+                           "linkedin", [])
+                job.update({"linkedin_id": job_id,
+                            "description_incomplete": incomplete})
+                jobs.append(job)
     return jobs
 
 
@@ -877,7 +921,7 @@ DEFAULT_SOURCES = [
     "remoteok", "remotive", "arbeitnow", "weworkremotely",
     "larajobs", "jobspresso", "vuejobs",
     "himalayas", "jobicy", "workingnomads",
-    "themuse", "greenhouse", "lever",
+    "themuse", "greenhouse", "lever", "linkedin",
 ]
 
 

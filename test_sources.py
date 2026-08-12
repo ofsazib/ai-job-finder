@@ -202,3 +202,38 @@ def test_fetch_all_dedupes_by_url_and_isolates_failures(monkeypatch):
     jobs = sources.fetch_all(["good", "dupe", "broken"])
     urls = [j["url"] for j in jobs]
     assert urls == ["https://x.com/1", "https://x.com/2"]  # dup + failure survived
+
+
+def test_linkedin_paginates_dedupes_ids_and_fetches_detail(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sources, "LINKEDIN_SEARCHES", [("python", "Bangladesh")])
+    monkeypatch.setenv("LINKEDIN_MAX_PAGES", "2")
+    monkeypatch.setattr(sources.time, "sleep", lambda _: None)
+
+    def card(job_id, title):
+        return f'''<li><div data-entity-urn="urn:li:jobPosting:{job_id}">
+        <a class="base-card__full-link" href="https://linkedin.com/jobs/view/{job_id}?x=1"></a>
+        <h3 class="base-search-card__title">{title}</h3>
+        <h4 class="base-search-card__subtitle">Acme</h4>
+        <span class="job-search-card__location">Dhaka, Bangladesh</span>
+        <time datetime="2026-08-11"></time></div></li>'''
+
+    calls = []
+    def fake_get(url):
+        calls.append(url)
+        if "jobPosting/101" in url:
+            return b'<div class="show-more-less-html__markup">Python Django PostgreSQL AWS</div>'
+        if "jobPosting/102" in url:
+            raise OSError("blocked")
+        return (card("101", "Senior Python Engineer") +
+                (card("101", "Senior Python Engineer") if "start=25" in url
+                 else card("102", "Backend Engineer"))).encode()
+
+    monkeypatch.setattr(sources, "_get", fake_get)
+    jobs = sources.fetch_linkedin()
+    assert {j["linkedin_id"] for j in jobs} == {"101", "102"}
+    assert next(j for j in jobs if j["linkedin_id"] == "101")["description_incomplete"] is False
+    assert next(j for j in jobs if j["linkedin_id"] == "102")["description_incomplete"] is True
+    before = len(calls)
+    sources.fetch_linkedin()
+    assert len(calls) == before  # cached cards and details

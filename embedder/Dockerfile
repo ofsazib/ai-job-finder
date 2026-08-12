@@ -3,7 +3,7 @@
 # The main ai-job-finder code calls this via HTTP; nothing on the host
 # needs torch / onnxruntime / fastembed installed.
 
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # onnxruntime pulls in some libgomp etc. via apt on slim images.
 RUN apt-get update && apt-get install -y --no-install-recommends \

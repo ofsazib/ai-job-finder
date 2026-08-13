@@ -115,7 +115,11 @@ PDF text is cleaned into Markdown by the configured AI CLI without intentionally
 | `make embedder-logs` | Tail sidecar logs (model load progress, errors) |
 | `make embedder-health` | `curl /health` on the sidecar |
 | `make test` | Run the complete test suite |
-| `make clean` | Remove Docker state, generated output/caches, and `.venv`; preserve resume and `.env` |
+| `make clean` | Wipe Docker state, generated output/caches, and `.venv`; preserve resume and `.env` |
+| `make clean-docker` | Just the embedder container, image, and model volume |
+| `make clean-data` | Just `output/` + `__pycache__/` + `.pytest_cache` |
+| `make clean-venv` | Just `.venv/` (forces full deps reinstall on next `make setup`) |
+| `make fresh` | **DANGER:** everything `clean` removes **plus** `resume.md`/`resume.pdf`/`cv.*`. Prompts `YES` to confirm. `.env` is preserved. |
 
 ### Fallback (no docker)
 

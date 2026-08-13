@@ -1,4 +1,4 @@
-.PHONY: help check-python setup run find test clean clean-docker clean-data clean-venv embedder-build embedder-up embedder-down embedder-logs embedder-health up down
+.PHONY: help check-python setup run find test clean clean-docker clean-data clean-venv fresh embedder-build embedder-up embedder-down embedder-logs embedder-health up down
 
 # Use uv if available, else fall back to the local venv's python.
 PYTHON_BIN ?= python3
@@ -113,3 +113,12 @@ clean-venv: ## Remove the local virtualenv (forces full deps reinstall on next s
 	else \
 		echo "• .venv/ not present — skipping"; \
 	fi
+
+fresh: ## DANGER: wipe resume + cv too (true fresh start). .env is PRESERVED.
+	@printf "This will delete resume.md, resume.pdf, cv.md, cv.pdf AND run 'make clean' (docker + output + venv). Type YES to confirm: "
+	@read ans; [ "$$ans" = "YES" ] || { echo "Aborted — nothing removed."; exit 1; }
+	@$(MAKE) --no-print-directory clean
+	@echo "• Removing resume.md, resume.pdf, cv.md, cv.pdf…"
+	rm -f resume.md resume.pdf cv.md cv.pdf
+	@echo ""
+	@echo "✓ Truly fresh. .env preserved. Rebuild with:  make setup && make up"
